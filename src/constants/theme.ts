@@ -1,33 +1,38 @@
+// Deriv-inspired professional trading theme
 export const COLORS = {
-  // Primary colors
-  primary: '#FFD700', // Gold
-  primaryDark: '#B8860B', // Dark gold
-  secondary: '#00D4FF', // Cyan
+  // Primary colors - Deriv red/coral
+  primary: '#FF444F', // Deriv red
+  primaryDark: '#E53935',
+  secondary: '#00D4FF',
   
-  // Background colors
-  background: '#0A0A0F', // Very dark background
-  surface: '#12121A', // Card background
-  surfaceLight: '#1A1A25', // Lighter surface
+  // Background colors - Clean dark theme
+  background: '#1A1A2E', // Deep navy background
+  surface: '#16213E', // Card background
+  surfaceLight: '#1E2D4A', // Lighter surface
   
   // Text colors
-  text: '#FFFFFF', // Primary text
-  textSecondary: '#8E8E93', // Secondary text
-  textMuted: '#636366', // Muted text
+  text: '#FFFFFF',
+  textSecondary: '#A0AEC0', // Muted blue-gray
+  textMuted: '#6B7280',
   
   // Status colors
-  success: '#34C759', // Green
-  error: '#FF3B30', // Red
-  warning: '#FF9500', // Orange
-  demo: '#FFD700', // Yellow for demo badge
-  real: '#FF3B30', // Red for real badge
+  success: '#10B981', // Emerald green
+  error: '#EF4444', // Red
+  warning: '#F59E0B', // Amber
+  demo: '#FFD700', // Gold for demo
+  real: '#EF4444', // Red for real
   
   // Trading colors
-  long: '#34C759', // Green for long
-  short: '#FF3B30', // Red for short
+  long: '#10B981', // Green for BUY
+  short: '#EF4444', // Red for SELL
   
   // Borders
-  border: '#2C2C34', // Subtle border
-  borderLight: '#3A3A42', // Lighter border
+  border: '#2D3748',
+  borderLight: '#4A5568',
+  
+  // Gold accent (for branding)
+  gold: '#FFD700',
+  goldDark: '#B8860B',
 };
 
 export const FONTS = {
@@ -69,35 +74,27 @@ export const SIZES = {
   radiusMedium: 12,
   radiusLarge: 16,
   radiusXl: 24,
+  radiusFull: 9999,
 };
 
 export const SHADOWS = {
   small: {
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 2,
   },
   medium: {
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 4.65,
     elevation: 4,
   },
   large: {
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 6,
-    },
+    shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.37,
     shadowRadius: 7.46,
     elevation: 6,
@@ -106,26 +103,28 @@ export const SHADOWS = {
 
 // Trading configuration
 export const TRADING_CONFIG = {
-  SMA_PERIOD: 20, // 20-period SMA
-  STOP_LOSS_PIPS: 200, // 200 pips above entry for short
-  TP1_PIPS: 300, // 300 pips below entry for short
-  TP2_PIPS: 500, // 500 pips below entry for short
-  STAKE_AMOUNT: 1, // $1 stake for demo trades
-  MAX_SUGGESTIONS: 10, // Keep last 10 suggestions
-  RECONNECT_INTERVAL: 3000, // 3 seconds reconnect interval
-  MAX_RECONNECT_ATTEMPTS: 5, // Maximum reconnect attempts
+  SMA_PERIOD: 20,
+  STOP_LOSS_PIPS: 200,
+  TP1_PIPS: 300,
+  TP2_PIPS: 500,
+  STAKE_AMOUNT: 1,
+  MAX_SUGGESTIONS: 10,
+  RECONNECT_INTERVAL: 3000,
+  MAX_RECONNECT_ATTEMPTS: 5,
 };
 
-// Deriv API configuration
+// Deriv API configuration — secrets MUST come from .env only
 export const DERIV_CONFIG = {
   WS_URL: 'wss://ws.derivws.com/websockets/v3',
-  APP_ID: process.env.EXPO_PUBLIC_DERIV_APP_ID || '1089', // 1089 is Deriv's test app_id
+  APP_ID: process.env.EXPO_PUBLIC_DERIV_APP_ID || '',
   API_TOKEN: process.env.EXPO_PUBLIC_DERIV_API_TOKEN || '',
   ALLOW_REAL: process.env.EXPO_PUBLIC_ALLOW_REAL === 'true',
 };
 
-// Symbols to track (Deriv API uses 'frx' prefix for forex symbols)
+// Symbols to track
 export const SYMBOLS = {
-  XAUUSD: 'frxXAUUSD', // Gold
-  GBPUSD: 'frxGBPUSD', // GBP/USD
+  XAUUSD: 'frxXAUUSD',
+  GBPUSD: 'frxGBPUSD',
+  AUDUSD: 'frxAUDUSD',
+  R_100: 'R_100',
 };

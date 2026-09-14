@@ -55,14 +55,35 @@ export type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnec
 
 export type MarketContext = 'LONG' | 'SHORT' | 'NEUTRAL';
 
-export interface TradeSuggestion {
+export type TradeDirection = 'BUY' | 'SELL';
+
+export interface ActivePosition {
   id: string;
+  contractId: number;
   symbol: string;
+  direction: TradeDirection;
   entryPrice: number;
   stopLoss: number;
   tp1: number;
   tp2: number;
-  context: MarketContext;
+  stake: number;
+  currentPrice: number;
+  profit: number;
+  openTime: Date;
+  status: 'open' | 'closing' | 'closed';
+  payout: number;
+}
+
+export interface TradeSuggestion {
+  id: string;
+  symbol: string;
+  direction: TradeDirection;
+  entryPrice: number;
+  stopLoss: number;
+  tp1: number;
+  tp2: number;
+  confidence: number;
+  analysis: string;
   timestamp: Date;
   executed: boolean;
   executionResult?: string;
@@ -87,6 +108,7 @@ export interface AppState {
     GBPUSD: MarketData;
   };
   suggestions: TradeSuggestion[];
+  activePositions: ActivePosition[];
   profitTable: DerivProfitTable | null;
   error: string | null;
 }

@@ -1,90 +1,74 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
-import { MarketContext } from '../types';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
+import { COLORS, FONTS, SIZES } from '../constants/theme';
+import { TradeDirection } from '../types';
 
 interface MarketDataCardProps {
   symbol: string;
   price: number;
   sma: number;
-  context: MarketContext;
+  direction: TradeDirection | null;
+  higherTrend: TradeDirection | null;
   label: string;
+  closedUntil?: Date | null;
+  onRetry?: () => void;
 }
 
 export const MarketDataCard: React.FC<MarketDataCardProps> = ({
-  symbol,
-  price,
-  sma,
-  context,
-  label,
+  symbol, price, sma, direction, higherTrend, label, closedUntil, onRetry,
 }) => {
-  const getContextColor = () => {
-    switch (context) {
-      case 'LONG':
-        return COLORS.long;
-      case 'SHORT':
-        return COLORS.short;
-      default:
-        return COLORS.textMuted;
-    }
-  };
-
-  const getContextLabel = () => {
-    switch (context) {
-      case 'LONG':
-        return 'LONG CONTEXT';
-      case 'SHORT':
-        return 'SHORT CONTEXT';
-      default:
-        return 'NEUTRAL';
+  const getDirectionColor = () => {
+    switch (direction) {
+      case 'BUY': return COLORS.long;
+      case 'SELL': return COLORS.short;
+      default: return COLORS.textMuted;
     }
   };
 
   const formatPrice = (value: number) => {
-    if (symbol === 'XAUUSD') {
-      return value.toFixed(2);
-    }
+    if (symbol === 'XAUUSD') return value.toFixed(2);
     return value.toFixed(4);
   };
 
+  const isGold = symbol.includes('XAU');
+
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.symbolContainer}>
-          <Text style={styles.symbol}>{symbol}</Text>
+      <View style={styles.row}>
+        <View style={styles.left}>
+          <View style={styles.symbolRow}>
+            <MaterialIcons name={isGold ? 'diamond' : 'currency-exchange'} size={14} color={isGold ? COLORS.gold : COLORS.primary} />
+            <Text style={styles.symbol}>{symbol}</Text>
+            <View style={[styles.dirBadge, { backgroundColor: getDirectionColor() + '20' }]}>
+              <Text style={[styles.dirText, { color: getDirectionColor() }]}>{direction || '---'}</Text>
+            </View>
+            {higherTrend && (
+              <View style={[styles.trendBadge, { backgroundColor: higherTrend === 'BUY' ? COLORS.long + '20' : COLORS.short + '20' }]}>
+                <Text style={[styles.trendText, { color: higherTrend === 'BUY' ? COLORS.long : COLORS.short }]}>H4/D1 {higherTrend}</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.label}>{label}</Text>
         </View>
-        
-        <View style={[styles.contextBadge, { backgroundColor: getContextColor() + '20' }]}>
-          <Text style={[styles.contextText, { color: getContextColor() }]}>
-            {getContextLabel()}
-          </Text>
+        <View style={styles.priceCol}>
+          {closedUntil ? (
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={styles.price}>Market closed — reopens at {new Date(closedUntil).toLocaleString()}</Text>
+              {onRetry && (
+                <TouchableOpacity style={styles.retryBtn} onPress={onRetry}>
+                  <Text style={styles.retryText}>Retry now</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            <>
+              <Text style={styles.price}>{formatPrice(price)}</Text>
+              {sma > 0 && <Text style={styles.sma}>SMA {formatPrice(sma)}</Text>}
+            </>
+          )}
         </View>
       </View>
-      
-      <View style={styles.priceContainer}>
-        <Text style={styles.priceLabel}>Current Price</Text>
-        <Text style={styles.price}>{formatPrice(price)}</Text>
-      </View>
-      
-      <View style={styles.smaContainer}>
-        <Text style={styles.smaLabel}>20-Period SMA</Text>
-        <Text style={styles.sma}>{sma > 0 ? formatPrice(sma) : 'Calculating...'}</Text>
-      </View>
-      
-      {sma > 0 && (
-        <View style={styles.comparisonContainer}>
-          <Text style={styles.comparisonLabel}>vs SMA:</Text>
-          <Text style={[
-            styles.comparisonValue,
-            { color: price > sma ? COLORS.long : price < sma ? COLORS.short : COLORS.textMuted }
-          ]}>
-            {price > sma ? '↑ Above' : price < sma ? '↓ Below' : '→ At SMA'}
-            {' '}
-            ({((Math.abs(price - sma) / sma) * 100).toFixed(2)}%)
-          </Text>
-        </View>
-      )}
     </View>
   );
 };
@@ -93,83 +77,30 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: COLORS.surface,
     borderRadius: SIZES.radiusMedium,
-    padding: SIZES.paddingMedium,
+    padding: SIZES.paddingSmall + 4,
     marginHorizontal: SIZES.paddingMedium,
-    marginTop: SIZES.paddingMedium,
-    ...SHADOWS.medium,
+    marginTop: SIZES.paddingSmall,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: SIZES.paddingMedium,
-  },
-  symbolContainer: {
-    flex: 1,
-  },
-  symbol: {
-    ...FONTS.bold,
-    fontSize: SIZES.large,
-    color: COLORS.primary,
-  },
-  label: {
-    ...FONTS.regular,
-    fontSize: SIZES.small,
-    color: COLORS.textSecondary,
-    marginTop: 2,
-  },
-  contextBadge: {
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  left: { flex: 1, marginRight: 8 },
+  symbolRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  symbol: { ...FONTS.bold, fontSize: 13, color: COLORS.text },
+  label: { ...FONTS.regular, fontSize: 10, color: COLORS.textMuted, marginTop: 2 },
+  dirBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  dirText: { ...FONTS.bold, fontSize: 9 },
+  trendBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  trendText: { ...FONTS.bold, fontSize: 9 },
+  priceCol: { alignItems: 'flex-end' },
+  price: { ...FONTS.bold, fontSize: 18, color: COLORS.text, letterSpacing: -0.5 },
+  sma: { ...FONTS.regular, fontSize: 10, color: COLORS.textMuted, marginTop: 2 },
+  retryBtn: {
+    marginTop: 6,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: SIZES.radiusSmall,
+    borderRadius: 6,
+    backgroundColor: COLORS.primary,
   },
-  contextText: {
-    ...FONTS.semibold,
-    fontSize: SIZES.small,
-  },
-  priceContainer: {
-    marginBottom: SIZES.paddingSmall,
-  },
-  priceLabel: {
-    ...FONTS.regular,
-    fontSize: SIZES.small,
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-  },
-  price: {
-    ...FONTS.bold,
-    fontSize: SIZES.xxl,
-    color: COLORS.text,
-  },
-  smaContainer: {
-    marginBottom: SIZES.paddingSmall,
-  },
-  smaLabel: {
-    ...FONTS.regular,
-    fontSize: SIZES.small,
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-  },
-  sma: {
-    ...FONTS.semibold,
-    fontSize: SIZES.large,
-    color: COLORS.textSecondary,
-  },
-  comparisonContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: SIZES.paddingSmall,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  comparisonLabel: {
-    ...FONTS.regular,
-    fontSize: SIZES.small,
-    color: COLORS.textSecondary,
-    marginRight: 8,
-  },
-  comparisonValue: {
-    ...FONTS.medium,
-    fontSize: SIZES.small,
-  },
+  retryText: { ...FONTS.semibold, fontSize: 12, color: '#fff' },
 });

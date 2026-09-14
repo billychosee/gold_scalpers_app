@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
+import { COLORS, FONTS, SIZES } from '../constants/theme';
 import { DerivProfitTable } from '../types';
 
 interface ProfitSummaryProps {
@@ -8,10 +9,7 @@ interface ProfitSummaryProps {
   onRefresh: () => void;
 }
 
-export const ProfitSummary: React.FC<ProfitSummaryProps> = ({
-  profitTable,
-  onRefresh,
-}) => {
+export const ProfitSummary: React.FC<ProfitSummaryProps> = ({ profitTable, onRefresh }) => {
   const formatProfit = (profit: number | string) => {
     const num = typeof profit === 'string' ? parseFloat(profit) : profit;
     const safeNum = isNaN(num) ? 0 : num;
@@ -25,72 +23,56 @@ export const ProfitSummary: React.FC<ProfitSummaryProps> = ({
     return safeNum >= 0 ? COLORS.success : COLORS.error;
   };
 
+  const getTotalProfit = () => {
+    if (!profitTable) return 0;
+    let totalProfit = profitTable.total_profit;
+    if (isNaN(totalProfit) && profitTable.transactions) {
+      totalProfit = profitTable.transactions.reduce((sum: number, t: any) => {
+        const profit = typeof t.profit === 'string' ? parseFloat(t.profit) : (t.profit || 0);
+        return sum + (isNaN(profit) ? 0 : profit);
+      }, 0);
+    }
+    return isNaN(totalProfit) ? 0 : totalProfit;
+  };
+
+  const getWinRate = () => {
+    if (!profitTable?.transactions || profitTable.transactions.length === 0) return '0';
+    const wins = profitTable.transactions.filter((t: any) => {
+      const profit = typeof t.profit === 'string' ? parseFloat(t.profit) : (t.profit || 0);
+      return !isNaN(profit) && profit > 0;
+    }).length;
+    return ((wins / profitTable.transactions.length) * 100).toFixed(1);
+  };
+
+  const totalProfit = getTotalProfit();
+
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Monthly Profit</Text>
-        <TouchableOpacity 
-          style={styles.refreshButton} 
-          onPress={onRefresh}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.refreshText}>↻ Refresh</Text>
-        </TouchableOpacity>
+      <View style={styles.row}>
+        <View style={styles.left}>
+          <View style={styles.labelRow}>
+            <MaterialIcons name="assessment" size={14} color={COLORS.gold} />
+            <Text style={styles.label}>Performance</Text>
+          </View>
+          <Text style={[styles.profitValue, { color: getProfitColor(totalProfit) }]}>
+            {formatProfit(totalProfit)}
+          </Text>
+        </View>
+        <View style={styles.statsRight}>
+          <View style={styles.statItem}>
+            <Text style={styles.statValue}>{profitTable?.transactions?.length || 0}</Text>
+            <Text style={styles.statLabel}>Trades</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={styles.statItem}>
+            <Text style={[styles.statValue, { color: COLORS.success }]}>{getWinRate()}%</Text>
+            <Text style={styles.statLabel}>Win</Text>
+          </View>
+          <TouchableOpacity onPress={onRefresh} style={styles.refreshBtn}>
+            <Ionicons name="refresh" size={14} color={COLORS.primary} />
+          </TouchableOpacity>
+        </View>
       </View>
-      
-      {profitTable ? (
-        <View style={styles.content}>
-          <View style={styles.profitContainer}>
-            <Text style={styles.profitLabel}>Total Profit</Text>
-            {(() => {
-              // Calculate total profit from transactions if total_profit is missing/NaN
-              let totalProfit = profitTable.total_profit;
-              if (isNaN(totalProfit) && profitTable.transactions) {
-                totalProfit = profitTable.transactions.reduce((sum: number, t: any) => {
-                  const profit = typeof t.profit === 'string' ? parseFloat(t.profit) : (t.profit || 0);
-                  return sum + (isNaN(profit) ? 0 : profit);
-                }, 0);
-              }
-              const safeProfit = isNaN(totalProfit) ? 0 : totalProfit;
-              return (
-                <Text style={[
-                  styles.profitValue,
-                  { color: getProfitColor(safeProfit) }
-                ]}>
-                  {formatProfit(safeProfit)}
-                </Text>
-              );
-            })()}
-          </View>
-          
-          <View style={styles.statsContainer}>
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Trades</Text>
-              <Text style={styles.statValue}>
-                {profitTable.transactions?.length || 0}
-              </Text>
-            </View>
-            
-            <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Win Rate</Text>
-              <Text style={styles.statValue}>
-                {profitTable.transactions && profitTable.transactions.length > 0
-                  ? `${((profitTable.transactions.filter((t: any) => {
-                      const profit = typeof t.profit === 'string' ? parseFloat(t.profit) : (t.profit || 0);
-                      return !isNaN(profit) && profit > 0;
-                    }).length / profitTable.transactions.length) * 100).toFixed(1)}%`
-                  : 'N/A'
-                }
-              </Text>
-            </View>
-          </View>
-        </View>
-      ) : (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No profit data available</Text>
-          <Text style={styles.emptySubtext}>Tap refresh to load data</Text>
-        </View>
-      )}
     </View>
   );
 };
@@ -99,86 +81,24 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: COLORS.surface,
     borderRadius: SIZES.radiusMedium,
-    padding: SIZES.paddingMedium,
+    padding: SIZES.paddingSmall + 4,
     marginHorizontal: SIZES.paddingMedium,
-    marginTop: SIZES.paddingMedium,
-    marginBottom: SIZES.paddingMedium,
-    ...SHADOWS.medium,
+    marginTop: SIZES.paddingSmall,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SIZES.paddingMedium,
-  },
-  title: {
-    ...FONTS.semibold,
-    fontSize: SIZES.medium,
-    color: COLORS.text,
-  },
-  refreshButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: COLORS.surfaceLight,
-    borderRadius: SIZES.radiusSmall,
-  },
-  refreshText: {
-    ...FONTS.medium,
-    fontSize: SIZES.small,
-    color: COLORS.primary,
-  },
-  content: {
-    alignItems: 'center',
-  },
-  profitContainer: {
-    alignItems: 'center',
-    marginBottom: SIZES.paddingMedium,
-  },
-  profitLabel: {
-    ...FONTS.regular,
-    fontSize: SIZES.small,
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-  },
-  profitValue: {
-    ...FONTS.bold,
-    fontSize: SIZES.xxl,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    width: '100%',
-    paddingTop: SIZES.paddingSmall,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  statItem: {
-    alignItems: 'center',
-  },
-  statLabel: {
-    ...FONTS.regular,
-    fontSize: SIZES.small,
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-  },
-  statValue: {
-    ...FONTS.semibold,
-    fontSize: SIZES.medium,
-    color: COLORS.text,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: SIZES.paddingMedium,
-  },
-  emptyText: {
-    ...FONTS.medium,
-    fontSize: SIZES.font,
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-  },
-  emptySubtext: {
-    ...FONTS.regular,
-    fontSize: SIZES.small,
-    color: COLORS.textMuted,
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  left: { flex: 1 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
+  label: { ...FONTS.regular, fontSize: 11, color: COLORS.textMuted },
+  profitValue: { ...FONTS.bold, fontSize: 22, letterSpacing: -0.5 },
+  statsRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  statItem: { alignItems: 'center' },
+  statValue: { ...FONTS.bold, fontSize: 14, color: COLORS.text },
+  statLabel: { ...FONTS.regular, fontSize: 9, color: COLORS.textMuted },
+  statDivider: { width: 1, height: 20, backgroundColor: COLORS.border },
+  refreshBtn: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: COLORS.surfaceLight, justifyContent: 'center', alignItems: 'center',
   },
 });

@@ -21,6 +21,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "11b6431d-fd1c-4092-bffa-4e89176f79f1"
+      }
+    },
+    "owner": "billychosee"
   }
 }

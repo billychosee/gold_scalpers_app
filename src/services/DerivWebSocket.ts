@@ -41,15 +41,20 @@ interface OptionsApiResponse<T> {
 
 class DerivWebSocketService {
   private ws: WebSocket | null = null;
+  private publicWs: WebSocket | null = null;
   private messageHandlers: Map<string, MessageHandler[]> = new Map();
   private connectionHandlers: ConnectionHandler[] = [];
   private errorHandlers: ErrorHandler[] = [];
-  private reconnectAttempts = 0;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private authReconnectAttempts = 0;
+  private publicReconnectAttempts = 0;
+  private authReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private publicReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private isConnecting = false;
   private isManualDisconnect = false;
   private isRateLimited = false;
   private rateLimitTimer: ReturnType<typeof setTimeout> | null = null;
+  // Timestamp of the most recent subscribe attempt; used to avoid rapid reconnect loops
+  private lastSubscribeAt: number | null = null;
   private tokenId: string = DERIV_CONFIG.API_TOKEN;
   private appId: string = DERIV_CONFIG.APP_ID;
   private accountId: string | null = null;
@@ -169,114 +174,200 @@ class DerivWebSocketService {
     return result.data.url;
   }
 
+  private connectPublicSocket(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.publicWs?.readyState === WebSocket.OPEN) {
+        console.log('[Public WS] Reusing existing connection');
+        resolve();
+        return;
+      }
+
+      if (this.publicWs && this.publicWs.readyState === WebSocket.CONNECTING) {
+        console.log('[Public WS] Reusing existing connection');
+        resolve();
+        return;
+      }
+
+      const publicUrl = 'wss://api.derivws.com/trading/v1/options/ws/public';
+      console.log('[Public WS] Connecting to', publicUrl);
+      this.publicWs = new WebSocket(publicUrl);
+
+      this.publicWs.onopen = () => {
+        this.publicReconnectAttempts = 0;
+        console.log('[Public WS] Connected');
+        resolve();
+      };
+
+      this.publicWs.onmessage = (event) => {
+        try {
+          const raw = typeof event.data === 'string' ? event.data : JSON.stringify(event.data);
+          console.log('[Public Raw]', raw.substring ? raw.substring(0, 300) : raw);
+        } catch (err) {
+          console.log('[Public Raw] <unserializable data>');
+        }
+
+        try {
+          const message = JSON.parse(event.data);
+          if ((message as any).error) {
+            console.log('[Public Sub Error]', (message as any).error);
+          }
+          if (message.msg_type === 'tick' || (message as any).tick) {
+            console.log('[Public Tick]', JSON.stringify(message).substring(0, 500));
+          }
+          this.handleMessage(message);
+        } catch (error) {
+          console.error('[Public WS] Error parsing message:', error);
+        }
+      };
+
+      this.publicWs.onerror = (event) => {
+        console.log('[Public WS] Error', event);
+      };
+
+      this.publicWs.onclose = (event) => {
+        console.log('[Public WS] Closed', event.code, event.reason, (event as any).wasClean);
+        console.trace('[Public WS] Close triggered by:');
+        if (this.isManualDisconnect) return;
+        if (this.publicReconnectAttempts >= 3) {
+          console.log('[Public WS] Giving up after 3 reconnect attempts');
+          return;
+        }
+        if (this.publicReconnectTimer) clearTimeout(this.publicReconnectTimer);
+        this.publicReconnectAttempts += 1;
+        const delay = Math.min(3000 * this.publicReconnectAttempts, 15000);
+        console.log(`[Public WS] Reconnect attempt ${this.publicReconnectAttempts}/3 in ${delay}ms`);
+        this.publicReconnectTimer = setTimeout(() => {
+          this.connectPublicSocket().catch((err) => {
+            console.error('[Public WS] Reconnect failed:', err);
+          });
+        }, delay);
+      };
+    });
+  }
+
   // Connect to WebSocket
   async connect(): Promise<void> {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      console.log('[Connect] Already connected');
+      console.log('[Auth WS] Reusing existing connection');
+      return;
+    }
+
+    if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+      console.log('[Auth WS] Connection already in progress');
       return;
     }
 
     if (this.isConnecting) {
-      console.log('[Connect] Already connecting...');
+      console.log('[Auth WS] Already connecting...');
       return;
     }
 
-    // Don't try to connect if rate limited
     if (this.isRateLimited) {
-      console.log('[Connect] Rate limited - waiting...');
+      console.log('[Auth WS] Rate limited - waiting...');
       return;
     }
 
-    // Reset state before connecting
     this.isConnecting = true;
     this.isManualDisconnect = false;
     this.notifyConnectionStatus('connecting');
 
     try {
-      // STEP 1-3: Get accounts and OTP URL
       const accounts = await this.getAccountsList();
       const account = this.pickAccount(accounts);
       this.accountId = account.account_id;
-      
-      // Set initial balance from account info
+
       const initialBalance: DerivBalance = {
         balance: account.balance,
         currency: account.currency,
         loginid: account.account_id,
       };
       this.notifyBalance(initialBalance);
-      
-      // Get OTP URL (STEP 3)
-      const otpUrl = await this.getOtpUrl(account.account_id);
 
-      // STEP 4: Connect to the returned URL
-      console.log('[Step 4] Connecting to WebSocket...');
-      
+      const otpUrl = await this.getOtpUrl(account.account_id);
+      console.log('[Auth WS] Connecting to', otpUrl);
+
       this.ws = new WebSocket(otpUrl);
 
       this.ws.onopen = () => {
-        console.log('[Step 4] WebSocket connected!');
+        this.authReconnectAttempts = 0;
         this.isConnecting = false;
-        this.reconnectAttempts = 0;
+        console.log('[Auth WS] Connected');
         this.notifyConnectionStatus('connected');
-        
-        // Subscribe to market data immediately after connection
-        console.log('[Step 5] Subscribing to market data...');
-        this.subscribeTicks(SYMBOLS.XAUUSD);
-        this.subscribeTicks(SYMBOLS.GBPUSD);
+
+        this.connectPublicSocket().catch((err) => {
+          console.error('[Public WS] Failed to open:', err);
+        });
+
         this.getBalance();
       };
 
       this.ws.onmessage = (event) => {
         try {
+          const raw = typeof event.data === 'string' ? event.data : JSON.stringify(event.data);
+          console.log('[Auth Raw]', raw.substring ? raw.substring(0, 300) : raw);
+        } catch (err) {
+          console.log('[Auth Raw] <unserializable data>');
+        }
+
+        try {
           const message: WebSocketMessage = JSON.parse(event.data);
+          if ((message as any).error) {
+            console.log('[Auth Sub Error]', (message as any).error);
+          }
+          if (message.msg_type === 'tick' || (message as any).tick) {
+            console.log('[Auth Tick]', JSON.stringify(message).substring(0, 500));
+          }
           this.handleMessage(message);
         } catch (error) {
-          console.error('[Step 5] Error parsing message:', error);
+          console.error('[Auth WS] Error parsing message:', error);
         }
       };
 
       this.ws.onerror = (event) => {
-        console.error('[WebSocket] Error:', event);
+        console.log('[Auth WS] Error', event);
         this.isConnecting = false;
         this.notifyConnectionStatus('error');
         this.notifyError('WebSocket connection error');
       };
 
       this.ws.onclose = (event) => {
-        console.log(`[WebSocket] Closed: code=${event.code} reason=${event.reason}`);
+        console.log('[Auth WS] Closed', event.code, event.reason, (event as any).wasClean);
+        console.trace('[Auth WS] Close triggered by:');
         this.isConnecting = false;
         this.notifyConnectionStatus('disconnected');
-        
-        // Auto reconnect if not manually closed
-        if (!this.isManualDisconnect) {
-          this.attemptReconnect();
+
+        if (this.isManualDisconnect) return;
+        if (this.authReconnectAttempts >= 3) {
+          console.log('[Auth WS] Giving up after 3 reconnect attempts');
+          return;
         }
+        if (this.authReconnectTimer) clearTimeout(this.authReconnectTimer);
+        this.authReconnectAttempts += 1;
+        const delay = Math.min(3000 * this.authReconnectAttempts, 15000);
+        console.log(`[Auth WS] Reconnect attempt ${this.authReconnectAttempts}/3 in ${delay}ms`);
+        this.authReconnectTimer = setTimeout(() => {
+          this.connect().catch((err) => {
+            console.error('[Auth WS] Reconnect failed:', err);
+          });
+        }, delay);
       };
     } catch (error) {
       this.isConnecting = false;
       this.notifyConnectionStatus('error');
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('[Connect] Failed:', errorMessage);
-      
-      // Check if rate limited (429)
+      console.error('[Auth WS] Failed:', errorMessage);
+
       if (errorMessage.includes('429')) {
-        console.log('[Connect] Rate limited! Waiting 60 seconds before retry...');
+        console.log('[Auth WS] Rate limited! Waiting 60 seconds before retry...');
         this.isRateLimited = true;
-        
-        // Clear any existing rate limit timer
-        if (this.rateLimitTimer) {
-          clearTimeout(this.rateLimitTimer);
-        }
-        
-        // Wait 60 seconds before allowing reconnection
+        if (this.rateLimitTimer) clearTimeout(this.rateLimitTimer);
         this.rateLimitTimer = setTimeout(() => {
-          console.log('[Connect] Rate limit cleared, allowing reconnection');
+          console.log('[Auth WS] Rate limit cleared, allowing reconnection');
           this.isRateLimited = false;
-          this.reconnectAttempts = 0;
+          this.authReconnectAttempts = 0;
         }, 60000);
       }
-      
+
       this.notifyError(errorMessage);
       throw error;
     }
@@ -289,9 +380,14 @@ class DerivWebSocketService {
     this.isConnecting = false;
     this.isRateLimited = false;
     
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
+    if (this.authReconnectTimer) {
+      clearTimeout(this.authReconnectTimer);
+      this.authReconnectTimer = null;
+    }
+
+    if (this.publicReconnectTimer) {
+      clearTimeout(this.publicReconnectTimer);
+      this.publicReconnectTimer = null;
     }
     
     if (this.rateLimitTimer) {
@@ -299,6 +395,11 @@ class DerivWebSocketService {
       this.rateLimitTimer = null;
     }
     
+    if (this.publicWs) {
+      this.publicWs.close(1000, 'Manual disconnect');
+      this.publicWs = null;
+    }
+
     if (this.ws) {
       this.ws.close(1000, 'Manual disconnect');
       this.ws = null;
@@ -308,20 +409,43 @@ class DerivWebSocketService {
     this.notifyConnectionStatus('disconnected');
   }
 
-  // Send message to WebSocket
-  private send(message: object): void {
+  // Send message to the authenticated OTP WebSocket
+  private sendAuthenticated(message: object): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {
-      throw new Error('WebSocket is not connected');
+      throw new Error('Authenticated WebSocket is not connected');
+    }
+  }
+
+  // Send message to the public market-data WebSocket
+  private sendPublic(message: object): void {
+    if (this.publicWs?.readyState === WebSocket.OPEN) {
+      this.publicWs.send(JSON.stringify(message));
+    } else {
+      throw new Error('Public tick WebSocket is not connected');
     }
   }
 
   // Handle incoming messages
   private handleMessage(message: WebSocketMessage): void {
-    const { msg_type } = message;
-    
-    // Notify all handlers for this message type
+    // Normalize message type: Deriv Options WS uses 'ticks' msg_type but app expects 'tick'
+    const originalType = (message as any).msg_type;
+    const msg_type = originalType === 'ticks' ? 'tick' : originalType;
+
+    // Log subscription errors and ticks (STEP 4)
+    try {
+      if ((message as any).error) {
+        console.log('[Sub Error]', (message as any).error);
+      }
+      if (msg_type === 'tick' || (message as any).tick || (message as any).ticks) {
+        console.log('[Tick]', JSON.stringify(message).substring(0, 500));
+      }
+    } catch (err) {
+      // Swallow logging errors
+    }
+
+    // Notify all handlers for this message type (use normalized type)
     const handlers = this.messageHandlers.get(msg_type);
     if (handlers) {
       handlers.forEach(handler => handler(message));
@@ -340,34 +464,9 @@ class DerivWebSocketService {
     this.handleMessage(message);
   }
 
-  // Attempt to reconnect with exponential backoff (STEP 6)
+  // Legacy shared reconnect hook retained but unused; auth/public sockets now reconnect independently.
   private attemptReconnect(): void {
-    // Don't reconnect if rate limited
-    if (this.isRateLimited) {
-      console.log('[Reconnect] Rate limited - skipping reconnect');
-      return;
-    }
-
-    if (this.reconnectAttempts >= TRADING_CONFIG.MAX_RECONNECT_ATTEMPTS) {
-      console.log('[Reconnect] Max attempts reached');
-      this.notifyError('Max reconnection attempts reached');
-      return;
-    }
-
-    this.reconnectAttempts++;
-    
-    // Exponential backoff: 5s, 10s, 20s, 30s, 30s (capped at 30s)
-    // Start higher to avoid rate limiting (429)
-    const delay = Math.min(5000 * Math.pow(2, this.reconnectAttempts - 1), 30000);
-    console.log(`[Reconnect] Attempt ${this.reconnectAttempts}/${TRADING_CONFIG.MAX_RECONNECT_ATTEMPTS} in ${delay}ms`);
-
-    this.reconnectTimer = setTimeout(() => {
-      console.log('[Reconnect] Re-running Steps 1-4...');
-      this.connect().catch((err) => {
-        console.error('[Reconnect] Failed:', err);
-        // Will retry via onclose handler
-      });
-    }, delay);
+    // no-op; the auth and public socket close handlers own their respective retry loops
   }
 
   // Register message handler
@@ -421,25 +520,37 @@ class DerivWebSocketService {
     this.errorHandlers.forEach(handler => handler(error));
   }
 
-  // Subscribe to ticks (STEP 5)
+  // Subscribe to ticks via the dedicated public market-data socket.
+  // This must only send when the public socket is already open; do not trigger a nested reconnect loop.
   subscribeTicks(symbol: string): void {
-    console.log(`[Step 5] Subscribing to ticks: ${symbol}`);
-    this.send({
+    if (this.publicWs?.readyState !== WebSocket.OPEN) {
+      console.log('[Public WS] Skipping subscribe; socket is not open yet:', symbol);
+      return;
+    }
+
+    console.log(`[Public WS] Subscribing to ticks: ${symbol}`);
+    this.lastSubscribeAt = Date.now();
+    const reqId = Date.now() % 1000000000;
+
+    this.sendPublic({
       ticks: symbol,
       subscribe: 1,
+      req_id: reqId,
     });
   }
 
   // Unsubscribe from ticks
   unsubscribeTicks(symbol: string): void {
-    this.send({
-      forget: symbol,
-    });
+    if (this.publicWs?.readyState === WebSocket.OPEN) {
+      this.sendPublic({
+        forget: symbol,
+      });
+    }
   }
 
   // Get balance
   getBalance(): void {
-    this.send({
+    this.sendAuthenticated({
       balance: 1,
       subscribe: 1,
     });
@@ -447,14 +558,14 @@ class DerivWebSocketService {
 
   // Get profit table
   getProfitTable(startDate: string, endDate: string): void {
-    this.send({
+    this.sendAuthenticated({
       profit_table: 1,
       date_from: startDate,
       date_to: endDate,
     });
   }
 
-  // Get proposal for trade
+  // Get proposal for trade - uses unique integer req_id (required by Deriv API schema)
   getProposal(
     symbol: string,
     contractType: string,
@@ -463,25 +574,34 @@ class DerivWebSocketService {
     durationUnit: string = 'm'
   ): Promise<DerivProposal> {
     return new Promise((resolve, reject) => {
+      const reqId = Date.now() % 1000000000; // Integer required by API
+      
       const timeout = setTimeout(() => {
+        unsubscribe();
         reject(new Error('Get proposal timeout'));
       }, 10000);
 
       const unsubscribe = this.onMessage('proposal', (message) => {
+        const response = message as any;
+        // Match by req_id (both are integers)
+        if (response.req_id !== undefined && response.req_id !== reqId) return;
+        
         clearTimeout(timeout);
         unsubscribe();
         
-        const response = message as ProposalResponse;
+        console.log(`[Proposal] Response:`, JSON.stringify(response).substring(0, 500));
+        
         if (response.proposal) {
           resolve(response.proposal);
         } else if (response.error) {
+          console.error(`[Proposal] Error:`, response.error);
           reject(new Error(response.error.message));
         } else {
           reject(new Error('Failed to get proposal'));
         }
       });
 
-      this.send({
+      this.sendAuthenticated({
         proposal: 1,
         amount: stake,
         basis: 'stake',
@@ -490,6 +610,55 @@ class DerivWebSocketService {
         duration: duration,
         duration_unit: durationUnit,
         symbol: symbol,
+        req_id: reqId,
+      });
+    });
+  }
+
+  // Get historical candles for multi-timeframe analysis
+  // granularity and req_id MUST be integers per Deriv API schema
+  // Valid granularities: 60,120,180,300,600,900,1800,3600,7200,14400,28800,86400
+  getCandles(
+    symbol: string,
+    granularity: number,  // H4=14400, D1=86400
+    count: number
+  ): Promise<any[]> {
+    return new Promise((resolve, reject) => {
+      const reqId = Date.now() % 1000000000; // Integer req_id required by API
+      
+      const timeout = setTimeout(() => {
+        unsubscribe();
+        reject(new Error(`Get candles timeout for ${symbol} granularity=${granularity}`));
+      }, 30000);
+
+      const unsubscribe = this.onMessage('candles', (message) => {
+        const response = message as any;
+        // Match by req_id (both are integers)
+        if (response.req_id !== undefined && response.req_id !== reqId) return;
+        
+        clearTimeout(timeout);
+        unsubscribe();
+        
+        if (response.candles) {
+          console.log(`[Candles] Got ${response.candles.length} candles for ${symbol} g=${granularity}`);
+          resolve(response.candles);
+        } else if (response.error) {
+          reject(new Error(response.error.message));
+        } else {
+          resolve([]);
+        }
+      });
+
+      console.log(`[Candles] Requesting ${symbol} granularity=${granularity} count=${count} req_id=${reqId}`);
+      
+      this.sendAuthenticated({
+        ticks_history: symbol,
+        adjust_start_time: 1,
+        count: count,
+        end: 'latest',
+        granularity: granularity,
+        style: 'candles',
+        req_id: reqId,
       });
     });
   }
@@ -515,9 +684,91 @@ class DerivWebSocketService {
         }
       });
 
-      this.send({
+      this.sendAuthenticated({
         buy: proposalId,
         price: price,
+      });
+    });
+  }
+
+  // Sell (close) a contract
+  sellContract(contractId: number): Promise<{ sell_price: number; profit: number }> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Sell contract timeout'));
+      }, 10000);
+
+      const unsubscribe = this.onMessage('sell', (message) => {
+        clearTimeout(timeout);
+        unsubscribe();
+        
+        const response = message as any;
+        if (response.sell) {
+          resolve(response.sell);
+        } else if (response.error) {
+          reject(new Error(response.error.message));
+        } else {
+          reject(new Error('Failed to sell contract'));
+        }
+      });
+
+      this.sendAuthenticated({
+        sell: contractId,
+      });
+    });
+  }
+
+  // Get open positions (active contracts)
+  getOpenPositions(): Promise<any[]> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Get open positions timeout'));
+      }, 10000);
+
+      const unsubscribe = this.onMessage('portfolio', (message) => {
+        clearTimeout(timeout);
+        unsubscribe();
+        
+        const response = message as any;
+        if (response.portfolio) {
+          resolve(response.portfolio.contracts || []);
+        } else if (response.error) {
+          reject(new Error(response.error.message));
+        } else {
+          resolve([]);
+        }
+      });
+
+      this.sendAuthenticated({
+        portfolio: 1,
+      });
+    });
+  }
+
+  // Get contract proposal for selling (to get current price)
+  getContractInfo(contractId: number): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Get contract info timeout'));
+      }, 10000);
+
+      const unsubscribe = this.onMessage('proposal_open_contract', (message) => {
+        clearTimeout(timeout);
+        unsubscribe();
+        
+        const response = message as any;
+        if (response.proposal_open_contract) {
+          resolve(response.proposal_open_contract);
+        } else if (response.error) {
+          reject(new Error(response.error.message));
+        } else {
+          reject(new Error('Failed to get contract info'));
+        }
+      });
+
+      this.sendAuthenticated({
+        proposal_open_contract: 1,
+        contract_id: contractId,
       });
     });
   }

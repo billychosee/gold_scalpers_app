@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
 import { ConnectionStatus, DerivBalance } from '../types';
 
@@ -9,6 +10,7 @@ interface HeaderProps {
   activeLoginId: string | null;
   accountType: 'demo' | 'real' | null;
   balance: DerivBalance | null;
+  onMenuPress: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -17,91 +19,73 @@ export const Header: React.FC<HeaderProps> = ({
   activeLoginId,
   accountType,
   balance,
+  onMenuPress,
 }) => {
   const getStatusColor = () => {
     switch (connectionStatus) {
-      case 'connected':
-        return COLORS.success;
-      case 'connecting':
-        return COLORS.warning;
-      case 'error':
-        return COLORS.error;
-      default:
-        return COLORS.textMuted;
+      case 'connected': return COLORS.success;
+      case 'connecting': return COLORS.warning;
+      case 'error': return COLORS.error;
+      default: return COLORS.textMuted;
     }
   };
 
   const getStatusText = () => {
     switch (connectionStatus) {
-      case 'connected':
-        return 'Connected';
-      case 'connecting':
-        return 'Connecting...';
-      case 'error':
-        return 'Error';
-      default:
-        return 'Disconnected';
+      case 'connected': return 'Live';
+      case 'connecting': return 'Connecting';
+      case 'error': return 'Error';
+      default: return 'Offline';
     }
   };
 
-  // Safety banner color based on account_type
-  const getBannerColor = () => {
-    if (!accountType) return COLORS.warning; // ORANGE if unknown
-    return accountType === 'demo' ? COLORS.success : COLORS.error;
-  };
-
-  // Mask account ID for safety banner (first 3 + last 3 chars)
-  const getMaskedId = () => {
-    if (!activeLoginId) return '***';
-    if (activeLoginId.length <= 6) return activeLoginId;
-    return activeLoginId.substring(0, 3) + '***' + activeLoginId.slice(-3);
-  };
-
-  // Get account type label
-  const getAccountTypeLabel = () => {
-    if (!accountType) return 'UNKNOWN ⚠️';
-    return accountType.toUpperCase();
-  };
-
-  // Format balance safely (handle string or number)
   const formatBalance = () => {
     if (!balance?.balance) return '0.00';
     const num = typeof balance.balance === 'string' ? parseFloat(balance.balance) : balance.balance;
     return (isNaN(num) ? 0 : num).toFixed(2);
   };
 
+  const getMaskedId = () => {
+    if (!activeLoginId) return '***';
+    if (activeLoginId.length <= 6) return activeLoginId;
+    return activeLoginId.substring(0, 3) + '***' + activeLoginId.slice(-3);
+  };
+
   return (
     <View style={styles.container}>
-      {/* Safety Banner */}
-      {activeLoginId && connectionStatus === 'connected' && (
-        <View style={[styles.safetyBanner, { backgroundColor: getBannerColor() }]}>
-          <Text style={styles.safetyBannerText}>
-            Trading on: {getMaskedId()} | {getAccountTypeLabel()} | ${formatBalance()}
-          </Text>
-        </View>
-      )}
-      
-      <View style={styles.headerRow}>
-        <View style={styles.titleContainer}>
-          <Text style={styles.title}>Gold Scalper</Text>
+      <View style={styles.topBar}>
+        {/* Hamburger Menu */}
+        <TouchableOpacity onPress={onMenuPress} style={styles.menuBtn}>
+          <MaterialIcons name="menu" size={24} color={COLORS.text} />
+        </TouchableOpacity>
+        
+        <View style={styles.logoContainer}>
+          <MaterialIcons name="candlestick-chart" size={22} color={COLORS.gold} />
+          <Text style={styles.logoText}>GOLD</Text>
+          <Text style={styles.logoAccent}>SCALPER</Text>
         </View>
         
-        <View style={styles.statusContainer}>
+        <View style={styles.statusRow}>
           <View style={[styles.statusDot, { backgroundColor: getStatusColor() }]} />
-          <Text style={[styles.statusText, { color: getStatusColor() }]}>
-            {getStatusText()}
-          </Text>
-          
-          <View style={[
-            styles.accountBadge,
-            { backgroundColor: accountType === 'demo' ? COLORS.demo : accountType === 'real' ? COLORS.real : COLORS.warning }
-          ]}>
-            <Text style={styles.accountBadgeText}>
-              {accountType === 'demo' ? 'DEMO' : accountType === 'real' ? 'REAL' : 'UNSAFE'}
-            </Text>
-          </View>
+          <Text style={[styles.statusText, { color: getStatusColor() }]}>{getStatusText()}</Text>
         </View>
       </View>
+      
+      {/* Compact Account Bar */}
+      {activeLoginId && connectionStatus === 'connected' && (
+        <View style={styles.accountBar}>
+          <View style={styles.accountInfo}>
+            <View style={[
+              styles.accountBadge,
+              { backgroundColor: accountType === 'demo' ? COLORS.gold : COLORS.error }
+            ]}>
+              <Text style={styles.accountBadgeText}>{accountType?.toUpperCase() || 'DEMO'}</Text>
+            </View>
+            <Text style={styles.accountId}>{getMaskedId()}</Text>
+          </View>
+          <Text style={styles.balanceText}>${formatBalance()}</Text>
+        </View>
+      )}
     </View>
   );
 };
@@ -112,54 +96,45 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
-  safetyBanner: {
-    paddingHorizontal: SIZES.paddingMedium,
-    paddingVertical: 6,
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SIZES.paddingSmall,
+    paddingVertical: SIZES.paddingSmall,
   },
-  safetyBannerText: {
-    ...FONTS.bold,
-    fontSize: 11,
-    color: COLORS.background,
-    textAlign: 'center',
+  menuBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  headerRow: {
+  logoContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  logoText: { ...FONTS.bold, fontSize: 15, color: COLORS.text, letterSpacing: 1 },
+  logoAccent: { ...FONTS.bold, fontSize: 15, color: COLORS.gold, letterSpacing: 1 },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusText: { ...FONTS.medium, fontSize: 11 },
+  accountBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: SIZES.paddingMedium,
-    paddingVertical: SIZES.paddingSmall,
+    paddingBottom: SIZES.paddingSmall,
   },
-  titleContainer: {
-    flex: 1,
-  },
-  title: {
-    ...FONTS.bold,
-    fontSize: SIZES.large,
-    color: COLORS.primary,
-  },
-  statusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  statusText: {
-    ...FONTS.medium,
-    fontSize: SIZES.small,
-    marginRight: 12,
-  },
-  accountBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  accountBadgeText: {
-    ...FONTS.bold,
-    fontSize: 10,
-    color: COLORS.background,
-  },
+  accountInfo: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  accountBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  accountBadgeText: { ...FONTS.bold, fontSize: 9, color: COLORS.background, letterSpacing: 0.5 },
+  accountId: { ...FONTS.medium, fontSize: 11, color: COLORS.textSecondary },
+  balanceText: { ...FONTS.semibold, fontSize: 13, color: COLORS.text },
 });

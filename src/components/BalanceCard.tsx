@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
+import { COLORS, FONTS, SIZES } from '../constants/theme';
 import { DerivBalance } from '../types';
 
 interface BalanceCardProps {
@@ -8,10 +9,7 @@ interface BalanceCardProps {
   onRefresh: () => void;
 }
 
-export const BalanceCard: React.FC<BalanceCardProps> = ({
-  balance,
-  onRefresh,
-}) => {
+export const BalanceCard: React.FC<BalanceCardProps> = ({ balance, onRefresh }) => {
   const formatBalance = (amount: number | string) => {
     const num = typeof amount === 'string' ? parseFloat(amount) : amount;
     return `$${(isNaN(num) ? 0 : num).toFixed(2)}`;
@@ -19,28 +17,26 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Account Balance</Text>
-        <TouchableOpacity 
-          style={styles.refreshButton} 
-          onPress={onRefresh}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.refreshText}>↻ Refresh</Text>
+      <View style={styles.row}>
+        <View style={styles.left}>
+          <View style={styles.labelRow}>
+            <MaterialIcons name="account-balance-wallet" size={14} color={COLORS.gold} />
+            <Text style={styles.label}>Portfolio</Text>
+          </View>
+          <Text style={styles.balance}>
+            {balance ? formatBalance(balance.balance) : '$0.00'}
+          </Text>
+        </View>
+        <TouchableOpacity onPress={onRefresh} style={styles.refreshBtn}>
+          <Ionicons name="refresh" size={16} color={COLORS.primary} />
         </TouchableOpacity>
       </View>
-      
-      <View style={styles.balanceContainer}>
-        <Text style={styles.balance}>
-          {balance ? formatBalance(balance.balance) : '$0.00'}
-        </Text>
-        {balance && (
-          <Text style={styles.currency}>{balance.currency}</Text>
-        )}
-      </View>
-      
       {balance && (
-        <Text style={styles.loginId}>Account: {balance.loginid}</Text>
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>{balance.currency}</Text>
+          <Text style={styles.footerDot}>|</Text>
+          <Text style={styles.footerText}>{balance.loginid}</Text>
+        </View>
       )}
     </View>
   );
@@ -50,52 +46,25 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: COLORS.surface,
     borderRadius: SIZES.radiusMedium,
-    padding: SIZES.paddingMedium,
+    padding: SIZES.paddingSmall + 4,
     marginHorizontal: SIZES.paddingMedium,
-    marginTop: SIZES.paddingMedium,
-    ...SHADOWS.medium,
+    marginTop: SIZES.paddingSmall,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SIZES.paddingSmall,
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  left: { flex: 1 },
+  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
+  label: { ...FONTS.regular, fontSize: 11, color: COLORS.textMuted },
+  balance: { ...FONTS.bold, fontSize: 26, color: COLORS.text, letterSpacing: -0.5 },
+  refreshBtn: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: COLORS.surfaceLight, justifyContent: 'center', alignItems: 'center',
   },
-  title: {
-    ...FONTS.semibold,
-    fontSize: SIZES.medium,
-    color: COLORS.text,
+  footer: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: COLORS.border,
   },
-  refreshButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: COLORS.surfaceLight,
-    borderRadius: SIZES.radiusSmall,
-  },
-  refreshText: {
-    ...FONTS.medium,
-    fontSize: SIZES.small,
-    color: COLORS.primary,
-  },
-  balanceContainer: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: 4,
-  },
-  balance: {
-    ...FONTS.bold,
-    fontSize: SIZES.xxl,
-    color: COLORS.success,
-  },
-  currency: {
-    ...FONTS.medium,
-    fontSize: SIZES.medium,
-    color: COLORS.textSecondary,
-    marginLeft: 8,
-  },
-  loginId: {
-    ...FONTS.regular,
-    fontSize: SIZES.small,
-    color: COLORS.textMuted,
-  },
+  footerText: { ...FONTS.regular, fontSize: 10, color: COLORS.textMuted },
+  footerDot: { color: COLORS.border, fontSize: 10 },
 });
