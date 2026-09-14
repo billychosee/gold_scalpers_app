@@ -1,27 +1,28 @@
 # Gold Scalpers
 
-Gold Scalpers is a React Native and Expo SDK 57 application for monitoring Deriv market data and managing trading suggestions for XAU/USD and GBP/USD.
+Gold Scalpers is an Expo SDK 57 React Native app that streams Deriv market data, analyzes multi-timeframe trends, and manages BUY/SELL trade signals and active positions for XAU/USD, GBP/USD, AUD/USD, and Volatility 100.
 
 ## Features
 
-- Live XAU/USD and GBP/USD tick streams through the Deriv WebSocket API
-- Deriv demo-account selection by default, with an explicit real-account opt-in
-- Account balance and date-range profit history
-- 20-period simple moving average and market-context indicators
-- Counter-trend trade suggestions with entry, stop-loss, and take-profit levels
-- Five-minute Deriv contract proposals and execution
-- Automatic reconnection with exponential backoff
-- Pull-to-refresh account and profit data
+- Live tick streams for XAUUSD, GBPUSD, AUDUSD, and R_100 through the Deriv WebSocket API
+- Multi-timeframe analysis using H4/D1 EMA8/EMA21 trend detection
+- 20-period SMA and market direction indicators
+- BUY/SELL signals with 3-tick confirmation, 2-minute signal cooldown, confidence scores, and analysis text
+- Trade suggestions with resistance/support entry, stop-loss, and take-profit targets
+- Active position tracking with live profit and close-position actions
+- Balance, currency, and date-range profit summary
+- Trade History page for executed suggestions
+- Side-drawer navigation with Dashboard, Market Watch, Trade Signals, Trade History, Settings, and About pages
+- Demo-account selection by default, with explicit real-account opt-in
+- Automatic reconnect and market-closed retry helpers
 - Android, iOS, and web targets
-- Development, preview, and production EAS Build profiles
 
 ## Technology
 
-- Expo SDK 57
-- React Native 0.86
-- React 19
+- Expo SDK 57 (`expo ~57.0.21`, `expo-status-bar ~57.0.1`)
+- React Native 0.86 and React 19
 - TypeScript
-- Deriv Trading API and WebSocket API
+- Deriv REST and WebSocket APIs
 - EAS Build
 
 ## Requirements
@@ -41,14 +42,12 @@ npm install
 Create a `.env` file in the project root. This file is ignored by Git.
 
 ```env
-EXPO_PUBLIC_DERIV_APP_ID=1089
-EXPO_PUBLIC_DERIV_API_TOKEN=your_demo_api_token
+EXPO_PUBLIC_DERIV_APP_ID=your_deriv_app_id
+EXPO_PUBLIC_DERIV_API_TOKEN=your_deriv_api_token
 EXPO_PUBLIC_ALLOW_REAL=false
 ```
 
-`EXPO_PUBLIC_DERIV_API_TOKEN` must belong to the Deriv app ID. Use a restricted demo token where possible. Variables prefixed with `EXPO_PUBLIC_` are bundled into the client application, so never place production secrets or unrestricted credentials in this project.
-
-Real-account access remains disabled unless `EXPO_PUBLIC_ALLOW_REAL` is set exactly to `true` and no demo account is available. Test thoroughly with a demo account before considering real trades.
+`EXPO_PUBLIC_*` values are bundled into the client application. Use restricted demo tokens, never production credentials, and remove any hardcoded defaults from `src/constants/theme.ts` before public deployment. Real-account access remains disabled unless `EXPO_PUBLIC_ALLOW_REAL` is set exactly to `true` and no demo account is available.
 
 ## Development
 
@@ -80,34 +79,41 @@ Install the EAS CLI if it is not already available:
 npm install --global eas-cli
 ```
 
-Create an Android development build:
-
-```sh
-npx eas build --profile development --platform android
-```
-
-Create an Android preview APK:
+Create an internal preview APK:
 
 ```sh
 npx eas build --profile preview --platform android
 ```
 
-Create a production build:
+Production and development profiles can be added to `eas.json` when needed. iOS builds require configured Apple credentials and certificates.
+
+## Pushing updates to GitHub
+
+Commit and push project updates:
 
 ```sh
-npx eas build --profile production --platform android
+git add README.md
+git commit -m "Update README"
+git push origin main
 ```
-
-Production iOS builds may also require configured Apple credentials and certificates.
 
 ## Project Structure
 
 ```text
 .
-├── App.tsx                  # Root interface and refresh behavior
+├── App.tsx                  # Root navigation and dashboard layout
 ├── assets/                  # App icons and other static assets
 ├── src/
-│   ├── components/          # Market, account, profit, and trade UI
+│   ├── components/
+│   │   ├── pages/           # MarketWatch, TradeHistory, Settings, About
+│   │   ├── ActivePositions.tsx
+│   │   ├── BalanceCard.tsx
+│   │   ├── Header.tsx
+│   │   ├── MarketDataCard.tsx
+│   │   ├── ProfitSummary.tsx
+│   │   ├── SideDrawer.tsx
+│   │   ├── TradeSuggestionCard.tsx
+│   │   └── TradeSuggestionsList.tsx
 │   ├── constants/           # Theme, symbols, trading, and API configuration
 │   ├── hooks/               # Deriv connection and application state
 │   ├── services/            # Deriv REST and WebSocket client
