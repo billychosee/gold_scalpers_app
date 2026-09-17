@@ -1,5 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Alert } from 'react-native';
 import { derivWebSocket } from '../services/DerivWebSocket';
+import { tradeJournal } from '../services/TradeJournal';
+import { getPaperTrading, setPaperTrading } from '../services/Settings';
+import { fetchEconomicCalendar, isNewsDangerWindow, getBlockedSymbols, NewsEvent } from '../services/NewsFilter';
+import {
+  DiscoveredSymbol,
+  getActiveSymbols,
+  saveActiveSymbols,
+  getCachedDiscovery,
+  cacheDiscovery,
+  parseActiveSymbolsResponse,
+  mergeDiscovered,
+} from '../services/SymbolDiscovery';
 import {
   ConnectionStatus,
   DerivBalance,
@@ -11,8 +24,19 @@ import {
   TradeSuggestion,
   ActivePosition,
   DerivTick,
+  JournalEntry,
 } from '../types';
-import { TRADING_CONFIG, SYMBOLS } from '../constants/theme';
+import { TRADING_CONFIG, SYMBOLS, SYNTHETIC_SYMBOL_KEYS, PAPER_TRADING } from '../constants/theme';
+
+const SYNTHETIC_SYMBOLS = SYNTHETIC_SYMBOL_KEYS.map((key) => SYMBOLS[key]);
+
+export interface SyntheticMarketData {
+  symbol: string;
+  price: number;
+  sma: number;
+  direction: TradeDirection | null;
+  signalStatus: 'WAITING' | 'BUY' | 'SELL';
+}
 
 // Higher timeframe candle type
 interface Candle {
@@ -47,6 +71,27 @@ interface UseDerivWebSocketReturn {
   // Profit
   profitTable: DerivProfitTable | null;
   
+  // Trading mode
+  isPaperTrading: boolean;
+  togglePaperTrading: (value: boolean) => Promise<void>;
+
+  // Connection state
+  inCooldown: boolean;
+  cooldownRemainingSec: number;
+  manualRetry: () => void;
+
+  // News filter
+  blockedSymbols: string[];
+  nextNewsEvent: NewsEvent | null;
+  minutesUntilNews: number | null;
+  refreshNews: () => Promise<void>;
+
+  // Dynamic symbols
+  discoveredSymbols: DiscoveredSymbol[];
+  activeSymbols: string[];
+  toggleSymbol: (symbol: string) => Promise<void>;
+  refreshSymbols: () => void;
+  
   // Market data
   xauusdPrice: number;
   gbpusdPrice: number;
@@ -69,6 +114,7 @@ interface UseDerivWebSocketReturn {
   gbpusdTrend: TradeDirection | null;
   audusdTrend: TradeDirection | null;
   r100Trend: TradeDirection | null;
+  syntheticMarkets: SyntheticMarketData[];
   
   // Suggestions
   suggestions: TradeSuggestion[];
@@ -96,6 +142,11 @@ const TICK_CONFIRMATION_COUNT = 3;
 // Minimum SMA deviation for signal
 const MIN_SMA_DEVIATION_PERCENT = 0.05;
 
+const averageNumbers = (values: number[]): number => {
+  if (values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+};
+
 export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
   // Connection state
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
@@ -103,6 +154,73 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
   const [isVirtual, setIsVirtual] = useState<boolean>(true);
   const [accountType, setAccountType] = useState<'demo' | 'real' | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Paper trading mode — runtime toggle, persisted to AsyncStorage
+  const [paperTradingEnabled, setPaperTradingEnabledState] = useState<boolean>(PAPER_TRADING);
+
+  // Reconnect cooldown state
+  const [inCooldown, setInCooldown] = useState(false);
+  const [cooldownRemainingSec, setCooldownRemainingSec] = useState(0);
+
+  // News filter state
+  const [blockedSymbols, setBlockedSymbols] = useState<string[]>([]);
+  const [nextNewsEvent, setNextNewsEvent] = useState<NewsEvent | null>(null);
+  const [minutesUntilNews, setMinutesUntilNews] = useState<number | null>(null);
+
+  // Dynamic symbol discovery
+  const [discoveredSymbols, setDiscoveredSymbols] = useState<DiscoveredSymbol[]>([]);
+  const [activeSymbols, setActiveSymbols] = useState<string[]>([]);
+
+  // Force refresh news calendar
+  const refreshNews = useCallback(async () => {
+    await fetchEconomicCalendar();
+    const blocked = getBlockedSymbols();
+    setBlockedSymbols(blocked);
+  }, []);
+
+  // Toggle a symbol on/off
+  const toggleSymbol = useCallback(async (symbol: string) => {
+    setActiveSymbols((prev) => {
+      const isCurrentlyActive = prev.includes(symbol);
+      const next = isCurrentlyActive
+        ? prev.filter((s) => s !== symbol)
+        : [...prev, symbol];
+
+      // Persist
+      saveActiveSymbols(next);
+
+      // Subscribe/unsubscribe
+      if (isCurrentlyActive) {
+        try { derivWebSocket.unsubscribeTicks(symbol); } catch (e) { /* ok */ }
+        console.log(`[Symbols] Deactivated: ${symbol}`);
+      } else {
+        try { derivWebSocket.subscribeTicks(symbol); } catch (e) { /* ok */ }
+        console.log(`[Symbols] Activated: ${symbol}`);
+      }
+
+      return next;
+    });
+  }, []);
+
+  // Request fresh symbol discovery
+  const refreshSymbols = useCallback(() => {
+    try {
+      derivWebSocket.requestActiveSymbols();
+    } catch (e) {
+      console.warn('[Symbols] Failed to request active symbols:', e);
+    }
+  }, []);
+
+  // Load persisted paper trading setting on mount
+  useEffect(() => {
+    getPaperTrading().then(setPaperTradingEnabledState).catch(() => {});
+  }, []);
+
+  // Toggle paper trading — updates state AND persists
+  const togglePaperTrading = useCallback(async (value: boolean) => {
+    setPaperTradingEnabledState(value);
+    await setPaperTrading(value);
+  }, []);
   
   // Balance state
   const [balance, setBalance] = useState<DerivBalance | null>(null);
@@ -133,6 +251,15 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
   const [gbpusdTrend, setGbpusdTrend] = useState<TradeDirection | null>(null);
   const [audusdTrend, setAudusdTrend] = useState<TradeDirection | null>(null);
   const [r100Trend, setR100Trend] = useState<TradeDirection | null>(null);
+  const [syntheticMarkets, setSyntheticMarkets] = useState<SyntheticMarketData[]>(() =>
+    SYNTHETIC_SYMBOLS.map((symbol) => ({
+      symbol,
+      price: 0,
+      sma: 0,
+      direction: null,
+      signalStatus: 'WAITING',
+    })),
+  );
   
   // Suggestions state
   const [suggestions, setSuggestions] = useState<TradeSuggestion[]>([]);
@@ -145,6 +272,9 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
   const gbpusdTicksRef = useRef<DerivTick[]>([]);
   const audusdTicksRef = useRef<DerivTick[]>([]);
   const r100TicksRef = useRef<DerivTick[]>([]);
+  const syntheticTicksRef = useRef<Record<string, DerivTick[]>>({});
+  const syntheticLastSignalTimeRef = useRef<Record<string, number>>({});
+  const syntheticLastDirectionRef = useRef<Record<string, TradeDirection | null>>({});
 
   // Refs for tracking confirmed direction ticks
   const xauusdConfirmedTicksRef = useRef<number>(0);
@@ -168,6 +298,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
 
   // Guard against StrictMode double-invoke cleanup disconnecting a still-mounted socket lifecycle.
   const mountedRef = useRef(false);
+  const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Ref for tracking if real HTF candles are available
   const htfCandlesAvailableRef = useRef<boolean>(false);
@@ -517,18 +648,22 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       return { direction: null, confidence: 0, analysis: 'Collecting data...' };
     }
     
-    // CRITICAL: Check if real candle data is available
-    if (!htfCandlesAvailableRef.current) {
+    // R_100 does not have the FX candle-based HTF analysis, so it uses
+    // SMA and tick momentum to generate either BUY or SELL signals.
+    const requiresHigherTrend = symbol !== SYMBOLS.R_100 && symbol !== 'R_100';
+
+    // FX symbols need real candle data; R_100 does not depend on FX HTF candles.
+    if (requiresHigherTrend && !htfCandlesAvailableRef.current) {
       return { direction: null, confidence: 0, analysis: 'HTF candles not available - signals disabled' };
     }
-    
-    // Check if higher timeframe has a confirmed trend (H4 = D1)
-    if (!higherTrend) {
+
+    // FX symbols require a confirmed higher timeframe trend (H4 = D1).
+    if (requiresHigherTrend && !higherTrend) {
       return { direction: null, confidence: 0, analysis: 'No confirmed H4/D1 trend - waiting for alignment' };
     }
     
     // Only trade if H4 and D1 agree (confirmed trend)
-    if (htfAnalysis && htfAnalysis.h4Direction !== htfAnalysis.d1Direction && htfAnalysis.d1Direction !== null && htfAnalysis.h4Direction !== null) {
+    if (requiresHigherTrend && htfAnalysis && htfAnalysis.h4Direction !== htfAnalysis.d1Direction && htfAnalysis.d1Direction !== null && htfAnalysis.h4Direction !== null) {
       return { direction: null, confidence: 0, analysis: `H4=${htfAnalysis.h4Direction} but D1=${htfAnalysis.d1Direction} - conflicting, no signal` };
     }
     
@@ -563,10 +698,20 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       if (deviationPercent <= 0.1 && !momentumUp) {
         rawDirection = 'SELL';
       }
+    } else if (momentumUp && deviationPercent >= -0.1) {
+      // R_100: no HTF trend, so upward momentum above the SMA supports BUY.
+      rawDirection = 'BUY';
+    } else if (!momentumUp && deviationPercent <= 0.1) {
+      // R_100: downward momentum below the SMA supports SELL.
+      rawDirection = 'SELL';
     }
     
     if (!rawDirection) {
-      const waitingFor = higherTrend === 'BUY' ? 'BUY pullback near SMA' : 'SELL pullback near SMA';
+      const waitingFor = higherTrend === 'BUY'
+        ? 'BUY pullback near SMA'
+        : higherTrend === 'SELL'
+          ? 'SELL pullback near SMA'
+          : 'BUY or SELL momentum near SMA';
       return { direction: null, confidence: 0, analysis: `H4/D1=${higherTrend}, waiting for ${waitingFor} entry` };
     }
     
@@ -606,7 +751,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
     const priceStr = symbol.includes('XAUUSD') ? price.toFixed(2) : price.toFixed(4);
     const smaStr = symbol.includes('XAUUSD') ? sma.toFixed(2) : sma.toFixed(4);
     
-    let analysis = `H4/D1 trend: ${higherTrend}`;
+    let analysis = `H4/D1 trend: ${higherTrend || 'N/A (SMA + momentum)'}`;
     if (htfAnalysis) {
       analysis += ` | ${htfAnalysis.analysis}`;
     }
@@ -692,14 +837,118 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
     };
   }, []);
   
+  // Log a signal to the persistent trade journal
+  const logSignalToJournal = useCallback(async (
+    suggestion: TradeSuggestion,
+    htfAnalysis: HigherTimeframeAnalysis | null,
+  ) => {
+    const entry: JournalEntry = {
+      id: suggestion.id,
+      timestamp_signal: suggestion.timestamp.toISOString(),
+      timestamp_execution: null,
+      symbol: suggestion.symbol,
+      direction: suggestion.direction,
+      signal_reason: suggestion.analysis,
+      confidence_score: suggestion.confidence,
+      htf_trend: htfAnalysis
+        ? `H4:${htfAnalysis.h4Direction ?? 'NEUTRAL'} D1:${htfAnalysis.d1Direction ?? 'NEUTRAL'}`
+        : 'N/A',
+      ltf_context: `${suggestion.direction} at ${suggestion.entryPrice}`,
+      entry_price: 0,
+      stake: 0,
+      payout_percent: null,
+      expiry_seconds: 300, // 5-minute contract
+      predicted_outcome: null,
+      actual_outcome: 'not_executed',
+      profit: 0,
+      latency_ms: 0,
+      market_closed_at_entry: false,
+      paper_trade: paperTradingEnabled,
+    };
+    await tradeJournal.logSignal(entry);
+  }, []);
+
+  const analyzeSyntheticTick = useCallback((ticks: DerivTick[]): {
+    sma20: number;
+    direction: TradeDirection | null;
+    signalStatus: 'WAITING' | 'BUY' | 'SELL';
+    confidence: number;
+    analysis: string;
+  } => {
+    if (ticks.length < 50) {
+      return { sma20: 0, direction: null, signalStatus: 'WAITING', confidence: 0, analysis: 'Waiting for 50 ticks' };
+    }
+
+    const quotes = ticks.map((tick) => tick.quote);
+    const currentSma20 = averageNumbers(quotes.slice(-20));
+    const currentSma50 = averageNumbers(quotes.slice(-50));
+    const previousSma20 = averageNumbers(quotes.slice(-21, -1));
+    const previousSma50 = averageNumbers(quotes.slice(-51, -1));
+    const changes = quotes.slice(-15).map((quote, index, values) => index === 0 ? 0 : quote - values[index - 1]);
+    const gains = changes.reduce((sum, change) => sum + Math.max(change, 0), 0) / 14;
+    const losses = changes.reduce((sum, change) => sum + Math.max(-change, 0), 0) / 14;
+    const rsi = losses === 0 ? (gains === 0 ? 50 : 100) : 100 - (100 / (1 + gains / losses));
+    const direction = previousSma20 <= previousSma50 && currentSma20 > currentSma50 && rsi < 70
+      ? 'BUY'
+      : previousSma20 >= previousSma50 && currentSma20 < currentSma50 && rsi > 30
+        ? 'SELL'
+        : null;
+    const signalStatus: SyntheticMarketData['signalStatus'] = currentSma20 > currentSma50 ? 'BUY' : 'SELL';
+    return {
+      sma20: currentSma20,
+      direction,
+      signalStatus,
+      confidence: direction ? 60 : 0,
+      analysis: `SMA20=${currentSma20.toFixed(2)} ${currentSma20 > currentSma50 ? '>' : '<'} SMA50=${currentSma50.toFixed(2)}, RSI=${rsi.toFixed(0)}`,
+    };
+  }, []);
+
   // Handle tick updates
-  const handleTick = useCallback((symbol: string, tick: DerivTick) => {
+  const handleTick = useCallback((
+    symbol: string,
+    tick: DerivTick,
+    xauusdHtfTrend: TradeDirection | null,
+    gbpusdHtfTrend: TradeDirection | null,
+    audusdHtfTrend: TradeDirection | null,
+    r100HtfTrend: TradeDirection | null,
+  ) => {
     const isXauusd = symbol === SYMBOLS.XAUUSD || symbol === 'frxXAUUSD';
     const isGbpusd = symbol === SYMBOLS.GBPUSD || symbol === 'frxGBPUSD';
     const isAudusd = symbol === SYMBOLS.AUDUSD || symbol === 'frxAUDUSD';
     const isR100 = symbol === SYMBOLS.R_100 || symbol === 'R_100';
+    const isSynthetic = SYNTHETIC_SYMBOLS.includes(symbol);
 
-    if (!isXauusd && !isGbpusd && !isAudusd && !isR100) return;
+    if (!isXauusd && !isGbpusd && !isAudusd && !isR100 && !isSynthetic) return;
+
+    if (isSynthetic) {
+      const ticks = [...(syntheticTicksRef.current[symbol] || []), tick].slice(-200);
+      syntheticTicksRef.current[symbol] = ticks;
+      const analysis = analyzeSyntheticTick(ticks);
+
+      setSyntheticMarkets((previous) => previous.map((market) => market.symbol === symbol
+        ? { ...market, price: tick.quote, sma: analysis.sma20, direction: analysis.direction, signalStatus: analysis.signalStatus }
+        : market));
+      if (symbol === SYMBOLS.R_100) {
+        setR100Price(tick.quote);
+        setR100Sma(analysis.sma20);
+        setR100Direction(analysis.direction);
+      }
+
+      if (analysis.direction && syntheticLastDirectionRef.current[symbol] !== analysis.direction) {
+        const lastSignal = syntheticLastSignalTimeRef.current[symbol] || 0;
+        if (Date.now() - lastSignal >= SIGNAL_COOLDOWN_MS) {
+          console.log(`[Signal] ${symbol}: ${analysis.direction} confirmed (${analysis.confidence}%) - ${analysis.analysis}`);
+          const suggestion = createSuggestion(symbol, analysis.direction, tick.quote, analysis.confidence, analysis.analysis, null);
+          setSuggestions((previous) => [suggestion, ...previous].slice(0, TRADING_CONFIG.MAX_SUGGESTIONS));
+          logSignalToJournal(suggestion, null);
+          syntheticLastSignalTimeRef.current[symbol] = Date.now();
+        }
+        syntheticLastDirectionRef.current[symbol] = analysis.direction;
+      }
+
+      console.log(`[Tick] ${symbol}: price=${tick.quote}, sma=${analysis.sma20.toFixed(2)}, htf=NEUTRAL, direction=${analysis.direction || 'NEUTRAL'}`);
+      return;
+    }
 
     if (isXauusd) {
       setXauusdPrice(tick.quote);
@@ -708,7 +957,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       const sma = calculateSma(xauusdTicksRef.current, TRADING_CONFIG.SMA_PERIOD);
       setXauusdSma(sma);
 
-      const currentTrend = xauusdTrend;
+      const currentTrend = xauusdHtfTrend;
       const currentAnalysis = xauusdAnalysisRef.current;
       const analysis = analyzeMarket(tick.quote, sma, xauusdTicksRef.current, symbol, currentTrend, currentAnalysis);
 
@@ -724,6 +973,15 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
 
         if (xauusdConfirmedTicksRef.current >= TICK_CONFIRMATION_COUNT) {
           if (isSignalAllowed(symbol, analysis.direction, xauusdLastSignalTimeRef.current)) {
+            // News filter: block signal during high-impact events
+            const newsCheck = isNewsDangerWindow(symbol);
+            if (newsCheck.blocked) {
+              console.log(`[Signal] ${symbol} BLOCKED by news: ${newsCheck.event?.title} (${newsCheck.event?.currency})`);
+              xauusdConfirmedTicksRef.current = 0;
+              xauusdLastDirectionRef.current = null;
+              return;
+            }
+
             console.log(`[Signal] ${symbol}: ${analysis.direction} confirmed (${analysis.confidence}%) - ${analysis.analysis}`);
 
             const suggestion = createSuggestion(
@@ -739,6 +997,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
               const newSuggestions = [suggestion, ...prev];
               return newSuggestions.slice(0, TRADING_CONFIG.MAX_SUGGESTIONS);
             });
+            logSignalToJournal(suggestion, currentAnalysis);
 
             xauusdLastSignalTimeRef.current = Date.now();
             xauusdConfirmedTicksRef.current = 0;
@@ -750,9 +1009,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
         xauusdLastDirectionRef.current = null;
       }
 
-      if (xauusdTicksRef.current.length % 20 === 0) {
-        console.log(`[Tick] ${symbol}: price=${tick.quote}, sma=${sma.toFixed(2)}, htf=${currentTrend || 'none'}, direction=${analysis.direction || 'none'}, confidence=${analysis.confidence}`);
-      }
+      console.log(`[Tick] ${symbol}: price=${tick.quote}, sma=${sma.toFixed(2)}, htf=${currentTrend || 'NEUTRAL'}, direction=${analysis.direction || 'NEUTRAL'}`);
     } else if (isGbpusd) {
       setGbpusdPrice(tick.quote);
       gbpusdTicksRef.current = [...gbpusdTicksRef.current, tick].slice(-100);
@@ -760,7 +1017,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       const sma = calculateSma(gbpusdTicksRef.current, TRADING_CONFIG.SMA_PERIOD);
       setGbpusdSma(sma);
 
-      const currentTrend = gbpusdTrend;
+      const currentTrend = gbpusdHtfTrend;
       const currentAnalysis = gbpusdAnalysisRef.current;
       const analysis = analyzeMarket(tick.quote, sma, gbpusdTicksRef.current, symbol, currentTrend, currentAnalysis);
 
@@ -776,6 +1033,14 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
 
         if (gbpusdConfirmedTicksRef.current >= TICK_CONFIRMATION_COUNT) {
           if (isSignalAllowed(symbol, analysis.direction, gbpusdLastSignalTimeRef.current)) {
+            const newsCheck = isNewsDangerWindow(symbol);
+            if (newsCheck.blocked) {
+              console.log(`[Signal] ${symbol} BLOCKED by news: ${newsCheck.event?.title} (${newsCheck.event?.currency})`);
+              gbpusdConfirmedTicksRef.current = 0;
+              gbpusdLastDirectionRef.current = null;
+              return;
+            }
+
             console.log(`[Signal] ${symbol}: ${analysis.direction} confirmed (${analysis.confidence}%) - ${analysis.analysis}`);
 
             const suggestion = createSuggestion(
@@ -791,6 +1056,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
               const newSuggestions = [suggestion, ...prev];
               return newSuggestions.slice(0, TRADING_CONFIG.MAX_SUGGESTIONS);
             });
+            logSignalToJournal(suggestion, currentAnalysis);
 
             gbpusdLastSignalTimeRef.current = Date.now();
             gbpusdConfirmedTicksRef.current = 0;
@@ -802,9 +1068,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
         gbpusdLastDirectionRef.current = null;
       }
 
-      if (gbpusdTicksRef.current.length % 20 === 0) {
-        console.log(`[Tick] ${symbol}: price=${tick.quote}, sma=${sma.toFixed(2)}, htf=${currentTrend || 'none'}, direction=${analysis.direction || 'none'}, confidence=${analysis.confidence}`);
-      }
+      console.log(`[Tick] ${symbol}: price=${tick.quote}, sma=${sma.toFixed(2)}, htf=${currentTrend || 'NEUTRAL'}, direction=${analysis.direction || 'NEUTRAL'}`);
     } else if (isAudusd) {
       setAudusdPrice(tick.quote);
       audusdTicksRef.current = [...audusdTicksRef.current, tick].slice(-100);
@@ -812,7 +1076,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       const sma = calculateSma(audusdTicksRef.current, TRADING_CONFIG.SMA_PERIOD);
       setAudusdSma(sma);
 
-      const currentTrend = audusdTrend;
+      const currentTrend = audusdHtfTrend;
       const currentAnalysis = audusdAnalysisRef.current;
       const analysis = analyzeMarket(tick.quote, sma, audusdTicksRef.current, symbol, currentTrend, currentAnalysis);
 
@@ -828,6 +1092,14 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
 
         if (audusdConfirmedTicksRef.current >= TICK_CONFIRMATION_COUNT) {
           if (isSignalAllowed(symbol, analysis.direction, audusdLastSignalTimeRef.current)) {
+            const newsCheck = isNewsDangerWindow(symbol);
+            if (newsCheck.blocked) {
+              console.log(`[Signal] ${symbol} BLOCKED by news: ${newsCheck.event?.title} (${newsCheck.event?.currency})`);
+              audusdConfirmedTicksRef.current = 0;
+              audusdLastDirectionRef.current = null;
+              return;
+            }
+
             console.log(`[Signal] ${symbol}: ${analysis.direction} confirmed (${analysis.confidence}%) - ${analysis.analysis}`);
 
             const suggestion = createSuggestion(
@@ -843,6 +1115,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
               const newSuggestions = [suggestion, ...prev];
               return newSuggestions.slice(0, TRADING_CONFIG.MAX_SUGGESTIONS);
             });
+            logSignalToJournal(suggestion, currentAnalysis);
 
             audusdLastSignalTimeRef.current = Date.now();
             audusdConfirmedTicksRef.current = 0;
@@ -854,9 +1127,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
         audusdLastDirectionRef.current = null;
       }
 
-      if (audusdTicksRef.current.length % 20 === 0) {
-        console.log(`[Tick] ${symbol}: price=${tick.quote}, sma=${sma.toFixed(2)}, htf=${currentTrend || 'none'}, direction=${analysis.direction || 'none'}, confidence=${analysis.confidence}`);
-      }
+      console.log(`[Tick] ${symbol}: price=${tick.quote}, sma=${sma.toFixed(2)}, htf=${currentTrend || 'NEUTRAL'}, direction=${analysis.direction || 'NEUTRAL'}`);
     } else if (isR100) {
       setR100Price(tick.quote);
       r100TicksRef.current = [...r100TicksRef.current, tick].slice(-100);
@@ -864,7 +1135,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       const sma = calculateSma(r100TicksRef.current, TRADING_CONFIG.SMA_PERIOD);
       setR100Sma(sma);
 
-      const currentTrend = r100Trend;
+      const currentTrend = r100HtfTrend;
       const analysis = analyzeMarket(tick.quote, sma, r100TicksRef.current, symbol, currentTrend, null);
 
       if (analysis.direction) {
@@ -879,6 +1150,14 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
 
         if (r100ConfirmedTicksRef.current >= TICK_CONFIRMATION_COUNT) {
           if (isSignalAllowed(symbol, analysis.direction, r100LastSignalTimeRef.current)) {
+            const newsCheck = isNewsDangerWindow(symbol);
+            if (newsCheck.blocked) {
+              console.log(`[Signal] ${symbol} BLOCKED by news: ${newsCheck.event?.title}`);
+              r100ConfirmedTicksRef.current = 0;
+              r100LastDirectionRef.current = null;
+              return;
+            }
+
             console.log(`[Signal] ${symbol}: ${analysis.direction} confirmed (${analysis.confidence}%) - ${analysis.analysis}`);
 
             const suggestion = createSuggestion(
@@ -894,6 +1173,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
               const newSuggestions = [suggestion, ...prev];
               return newSuggestions.slice(0, TRADING_CONFIG.MAX_SUGGESTIONS);
             });
+            logSignalToJournal(suggestion, null);
 
             r100LastSignalTimeRef.current = Date.now();
             r100ConfirmedTicksRef.current = 0;
@@ -905,11 +1185,9 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
         r100LastDirectionRef.current = null;
       }
 
-      if (r100TicksRef.current.length % 20 === 0) {
-        console.log(`[Tick] ${symbol}: price=${tick.quote}, sma=${sma.toFixed(2)}, htf=${currentTrend || 'none'}, direction=${analysis.direction || 'none'}, confidence=${analysis.confidence}`);
-      }
+      console.log(`[Tick] ${symbol}: price=${tick.quote}, sma=${sma.toFixed(2)}, htf=${currentTrend || 'NEUTRAL'}, direction=${analysis.direction || 'NEUTRAL'}`);
     }
-  }, [calculateSma, analyzeMarket, isSignalAllowed, createSuggestion, xauusdTrend, gbpusdTrend, audusdTrend, r100Trend]);
+  }, [calculateSma, analyzeMarket, analyzeSyntheticTick, isSignalAllowed, createSuggestion, logSignalToJournal]);
   
   // Connect and authorize
   const connect = useCallback(async () => {
@@ -935,11 +1213,12 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
         // Load open positions
         refreshPositions();
         
-        // Immediately fetch higher timeframe analysis after 3 seconds
-        setTimeout(() => {
-          console.log('[HTF] Triggering initial HTF analysis...');
-          refreshHigherTimeframe();
-        }, 3000);
+        // Fetch HTF analysis before requesting ticks so signal generation starts with trend context.
+        console.log('[HTF] Fetching initial HTF analysis before tick subscriptions...');
+        await refreshHigherTimeframe();
+        Object.values(SYMBOLS).forEach((symbol) => {
+          derivWebSocket.subscribeTicks(symbol);
+        });
         
         // Retry HTF analysis after 10 seconds if first attempt failed
         setTimeout(() => {
@@ -952,7 +1231,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       setError(errorMessage);
       throw err;
     }
-  }, []);
+  }, [refreshHigherTimeframe]);
   
   // Disconnect
   const disconnect = useCallback(() => {
@@ -979,6 +1258,16 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
     gbpusdTicksRef.current = [];
     audusdTicksRef.current = [];
     r100TicksRef.current = [];
+    syntheticTicksRef.current = {};
+    syntheticLastSignalTimeRef.current = {};
+    syntheticLastDirectionRef.current = {};
+    setSyntheticMarkets(SYNTHETIC_SYMBOLS.map((symbol) => ({
+      symbol,
+      price: 0,
+      sma: 0,
+      direction: null,
+      signalStatus: 'WAITING',
+    })));
   }, []);
   
   // Refresh balance
@@ -1046,8 +1335,20 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
     }
   }, [refreshBalance]);
   
-  // Execute trade
+  // Execute trade (supports paper + real/demo modes)
   const executeTrade = useCallback(async (suggestion: TradeSuggestion): Promise<boolean> => {
+    // News filter: block execution during high-impact events
+    const newsCheck = isNewsDangerWindow(suggestion.symbol);
+    if (newsCheck.blocked) {
+      const event = newsCheck.event;
+      const msg = event
+        ? `A high-impact news event is within the danger window.\n\n${event.title} (${event.currency}) — ${newsCheck.minutesUntil !== undefined ? `${newsCheck.minutesUntil.toFixed(0)} min away` : 'active'}\n\nTrade blocked for safety.`
+        : 'A high-impact news event is within the danger window. Trade blocked for safety.';
+      console.log(`[Trade] BLOCKED by news: ${suggestion.symbol} — ${event?.title}`);
+      Alert.alert('News event active', msg);
+      return false;
+    }
+
     try {
       console.log(`[Trade] Executing ${suggestion.direction} for ${suggestion.symbol} at ${suggestion.entryPrice}...`);
       
@@ -1063,21 +1364,168 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
         'm'
       );
       console.log(`[Trade] Got proposal: id=${proposal.id}, price=${proposal.price}`);
-      
-      // Execute buy
+
+      // ── Paper trading: simulate without real WS buy ──
+      if (paperTradingEnabled) {
+        console.log(`[Paper] Simulating ${suggestion.direction} — no real order sent`);
+
+        const paperPositionId = `paper-${Date.now()}`;
+        const newPosition: ActivePosition = {
+          id: paperPositionId,
+          contractId: 0,
+          symbol: suggestion.symbol,
+          direction: suggestion.direction,
+          entryPrice: proposal.price,
+          stopLoss: suggestion.stopLoss,
+          tp1: suggestion.tp1,
+          tp2: suggestion.tp2,
+          stake: TRADING_CONFIG.STAKE_AMOUNT,
+          currentPrice: proposal.price,
+          profit: 0,
+          openTime: new Date(),
+          status: 'open',
+          payout: proposal.payout || 0,
+        };
+        setActivePositions(prev => [newPosition, ...prev]);
+
+        // Update suggestion
+        setSuggestions(prev =>
+          prev.map(s =>
+            s.id === suggestion.id
+              ? { ...s, executed: true, executionResult: `Paper trade opened ${suggestion.direction}` }
+              : s
+          )
+        );
+
+        // Log execution to journal
+        await tradeJournal.logExecution(suggestion.id, {
+          timestamp_execution: new Date().toISOString(),
+          entry_price: proposal.price,
+          stake: TRADING_CONFIG.STAKE_AMOUNT,
+          payout_percent: proposal.payout,
+          latency_ms: Date.now() - suggestion.timestamp.getTime(),
+          predicted_outcome: null,
+        });
+
+        // Schedule outcome resolution after 5 minutes (300 seconds)
+        const expiryMs = 300 * 1000;
+        const entryPrice = proposal.price;
+        const direction = suggestion.direction;
+        const journalId = suggestion.id;
+        const payoutPct = proposal.payout || 0;
+        const stakeAmount = TRADING_CONFIG.STAKE_AMOUNT;
+        const symbol = suggestion.symbol;
+
+        setTimeout(async () => {
+          try {
+            // Fetch 2 candles: we want the LAST CLOSED candle (index 0),
+            // not the currently-forming one (index 1).
+            // count=2 with 60s granularity gives us the two most recent 1-min candles.
+            let settlementPrice: number | null = null;
+
+            try {
+              const candles = await derivWebSocket.getCandles(symbol, 60, 2);
+              if (candles.length >= 2) {
+                // Use the second-to-last candle — this is the last CLOSED candle
+                settlementPrice = candles[candles.length - 2].close;
+              } else if (candles.length === 1) {
+                // Only 1 candle available — market may have just opened
+                // Use its close but log a warning
+                settlementPrice = candles[0].close;
+                console.warn(`[Paper] Only 1 candle available for ${symbol} — using forming candle close`);
+              }
+            } catch (candleErr) {
+              console.error(`[Paper] getCandles failed for ${symbol}:`, candleErr);
+            }
+
+            // If we still have no settlement price, try fetching a live tick as last resort
+            if (settlementPrice === null) {
+              console.warn(`[Paper] No candle data for ${symbol} — trade marked as unresolved`);
+              // Mark as not executed rather than fabricating a result
+              await tradeJournal.logOutcome(journalId, 'not_executed', 0);
+              setActivePositions(prev => prev.filter(p => p.id !== paperPositionId));
+              setSuggestions(prev =>
+                prev.map(s =>
+                  s.id === journalId
+                    ? { ...s, executionResult: 'Resolution failed — no settlement data' }
+                    : s
+                )
+              );
+              return;
+            }
+
+            // Determine win/loss:
+            // CALL/BUY wins if settlement > entry
+            // PUT/SELL wins if settlement < entry
+            const win = direction === 'BUY'
+              ? settlementPrice > entryPrice
+              : settlementPrice < entryPrice;
+
+            const profit = win
+              ? (stakeAmount * payoutPct / 100) - stakeAmount
+              : -stakeAmount;
+
+            const dirLabel = direction === 'BUY' ? 'CALL' : 'PUT';
+            console.log(
+              `[Paper] Resolved ${journalId}: entry=${entryPrice} exit=${settlementPrice} direction=${dirLabel} result=${win ? 'WIN' : 'LOSS'} pnl=${profit.toFixed(2)}`
+            );
+
+            // Update journal with outcome
+            await tradeJournal.logOutcome(journalId, win ? 'win' : 'loss', profit);
+
+            // Remove from active positions
+            setActivePositions(prev => prev.filter(p => p.id !== paperPositionId));
+
+            // Update suggestion with result
+            setSuggestions(prev =>
+              prev.map(s =>
+                s.id === journalId
+                  ? { ...s, executionResult: `${win ? 'WIN' : 'LOSS'} — P&L $${profit.toFixed(2)}` }
+                  : s
+              )
+            );
+          } catch (err) {
+            console.error(`[Paper] Failed to resolve outcome for ${journalId}:`, err);
+            // Log as not_executed rather than silently dropping
+            await tradeJournal.logOutcome(journalId, 'not_executed', 0);
+            setActivePositions(prev => prev.filter(p => p.id !== paperPositionId));
+            setSuggestions(prev =>
+              prev.map(s =>
+                s.id === journalId
+                  ? { ...s, executionResult: 'Resolution error — check console' }
+                  : s
+              )
+            );
+          }
+        }, expiryMs);
+
+        return true;
+      }
+
+      // ── Real / Demo execution ──
       console.log(`[Trade] Sending buy order...`);
       const result = await derivWebSocket.buyContract(proposal.id, proposal.price);
       console.log(`[Trade] Buy successful! Contract ID: ${result.contract_id}`);
-      
+
       // Update suggestion
-      setSuggestions(prev => 
-        prev.map(s => 
+      setSuggestions(prev =>
+        prev.map(s =>
           s.id === suggestion.id
             ? { ...s, executed: true, executionResult: `Opened ${suggestion.direction} - Contract #${result.contract_id}` }
             : s
         )
       );
-      
+
+      // Log execution to journal
+      await tradeJournal.logExecution(suggestion.id, {
+        timestamp_execution: new Date().toISOString(),
+        entry_price: proposal.price,
+        stake: TRADING_CONFIG.STAKE_AMOUNT,
+        payout_percent: proposal.payout,
+        latency_ms: Date.now() - suggestion.timestamp.getTime(),
+        predicted_outcome: null,
+      });
+
       // Add to active positions
       const newPosition: ActivePosition = {
         id: `pos-${result.contract_id}`,
@@ -1095,12 +1543,12 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
         status: 'open',
         payout: result.payout || 0,
       };
-      
+
       setActivePositions(prev => [newPosition, ...prev]);
-      
+
       // Refresh balance
       refreshBalance();
-      
+
       return true;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Trade execution failed';
@@ -1117,7 +1565,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       return false;
     }
   }, [refreshBalance]);
-  
+
   // Retry subscribe helper (exposed to UI as "Retry now")
   const retrySubscribe = useCallback((symbol: string) => {
     let lastRetryRef: { current: number };
@@ -1223,7 +1671,14 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
 
       const tickResponse = message as TickResponse;
       if (tickResponse.tick) {
-        handleTick(tickResponse.tick.symbol, tickResponse.tick);
+        handleTick(
+          tickResponse.tick.symbol,
+          tickResponse.tick,
+          xauusdAnalysisRef.current?.combinedTrend ?? xauusdTrend,
+          gbpusdAnalysisRef.current?.combinedTrend ?? gbpusdTrend,
+          audusdAnalysisRef.current?.combinedTrend ?? audusdTrend,
+          r100Trend,
+        );
       }
     });
 
@@ -1247,6 +1702,19 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
         setError(errorResponse.error.message);
       }
     });
+
+    // Handler for active_symbols response
+    const unsubscribeActiveSymbols = derivWebSocket.onMessage('active_symbols', (message) => {
+      const discovered = parseActiveSymbolsResponse(message);
+      if (discovered.length > 0) {
+        // Merge with cached + FX defaults
+        getCachedDiscovery().then((cached) => {
+          const merged = mergeDiscovered(discovered, cached);
+          setDiscoveredSymbols(merged);
+          cacheDiscovery(merged);
+        });
+      }
+    });
     
     return () => {
       unsubscribeConnection();
@@ -1255,11 +1723,17 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       unsubscribeBalance();
       unsubscribeProfitTable();
       unsubscribeErrorResponse();
+      unsubscribeActiveSymbols();
     };
-  }, [handleTick]);
+  }, [handleTick, xauusdTrend, gbpusdTrend, audusdTrend, r100Trend]);
   
   // Auto-connect on mount; guard against StrictMode double-invoke cleanup.
   useEffect(() => {
+    if (disconnectTimerRef.current) {
+      clearTimeout(disconnectTimerRef.current);
+      disconnectTimerRef.current = null;
+    }
+
     if (mountedRef.current) return;
     mountedRef.current = true;
 
@@ -1267,10 +1741,31 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       // Connection failed, user can retry manually
     });
 
+    // Load news calendar on mount
+    fetchEconomicCalendar().catch(() => {});
+
+    // Load active symbols on mount
+    getActiveSymbols().then((syms) => {
+      setActiveSymbols(syms);
+      console.log(`[Symbols] Loaded ${syms.length} active symbols: ${syms.join(', ')}`);
+      // Subscribe to all active symbols once connected
+      syms.forEach((sym) => {
+        try { derivWebSocket.subscribeTicks(sym); } catch (e) { /* will subscribe on connect */ }
+      });
+    }).catch(() => {});
+
+    // Load cached discovered symbols
+    getCachedDiscovery().then((cached) => {
+      if (cached.length > 0) setDiscoveredSymbols(cached);
+    }).catch(() => {});
+
     return () => {
       if (!mountedRef.current) return;
       mountedRef.current = false;
-      disconnect();
+      disconnectTimerRef.current = setTimeout(() => {
+        disconnectTimerRef.current = null;
+        if (!mountedRef.current) disconnect();
+      }, 0);
     };
   }, [connect, disconnect]);
   
@@ -1295,7 +1790,74 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
     
     return () => clearInterval(interval);
   }, [connectionStatus, refreshHigherTimeframe]);
-  
+
+  // Poll cooldown state every second when disconnected
+  useEffect(() => {
+    if (connectionStatus === 'connected') return;
+    const interval = setInterval(() => {
+      const state = derivWebSocket.getConnectionState();
+      setInCooldown(state.inCooldown);
+      setCooldownRemainingSec(state.cooldownRemainingSec);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [connectionStatus]);
+
+  // Manual retry — resets all reconnect state and tries immediately
+  const handleManualRetry = useCallback(() => {
+    derivWebSocket.manualRetry();
+    setInCooldown(false);
+    setCooldownRemainingSec(0);
+  }, []);
+
+  // Periodic news danger window check (every 30 seconds)
+  useEffect(() => {
+    const checkNews = () => {
+      const blocked = getBlockedSymbols();
+      setBlockedSymbols(blocked);
+
+      // Find the closest upcoming news event for any watched symbol
+      const symbols = ['frxXAUUSD', 'frxGBPUSD', 'frxAUDUSD'];
+      let closestEvent: NewsEvent | null = null;
+      let closestMinutes = Infinity;
+
+      for (const sym of symbols) {
+        const result = isNewsDangerWindow(sym);
+        if (result.event && result.minutesUntil !== undefined) {
+          if (result.minutesUntil < closestMinutes || (result.blocked && (!closestEvent || result.minutesUntil < closestMinutes))) {
+            closestEvent = result.event;
+            closestMinutes = result.minutesUntil;
+          }
+        }
+      }
+
+      setNextNewsEvent(closestEvent);
+      setMinutesUntilNews(closestMinutes < Infinity ? closestMinutes : null);
+
+      // Log state changes
+      for (const sym of symbols) {
+        const result = isNewsDangerWindow(sym);
+        if (result.blocked && result.event) {
+          const minText = result.minutesUntil !== undefined
+            ? `${result.minutesUntil.toFixed(0)} min away`
+            : 'inside window';
+          console.log(`[News] ${sym} blocked — ${result.event.title} (${result.event.currency}) ${minText}`);
+        }
+      }
+    };
+
+    checkNews();
+    const interval = setInterval(checkNews, 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Refresh news calendar every hour
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchEconomicCalendar().catch(() => {});
+    }, 60 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   return {
     // Connection
     connectionStatus,
@@ -1309,6 +1871,27 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
      
     // Profit
     profitTable,
+
+    // Trading mode
+    isPaperTrading: paperTradingEnabled,
+    togglePaperTrading,
+
+    // Cooldown
+    inCooldown,
+    cooldownRemainingSec,
+    manualRetry: handleManualRetry,
+
+    // News filter
+    blockedSymbols,
+    nextNewsEvent,
+    minutesUntilNews,
+    refreshNews,
+
+    // Dynamic symbols
+    discoveredSymbols,
+    activeSymbols,
+    toggleSymbol,
+    refreshSymbols,
      
     // Market data
     xauusdPrice,
@@ -1332,6 +1915,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
     gbpusdTrend,
     audusdTrend,
     r100Trend,
+    syntheticMarkets,
      
     // Suggestions
     suggestions,

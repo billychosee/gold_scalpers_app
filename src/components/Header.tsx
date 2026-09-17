@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
 import { ConnectionStatus, DerivBalance } from '../types';
 
 interface HeaderProps {
@@ -11,6 +12,8 @@ interface HeaderProps {
   accountType: 'demo' | 'real' | null;
   balance: DerivBalance | null;
   onMenuPress: () => void;
+  upcomingNewsCount: number;
+  onNewsPress: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -20,13 +23,17 @@ export const Header: React.FC<HeaderProps> = ({
   accountType,
   balance,
   onMenuPress,
+  upcomingNewsCount,
+  onNewsPress,
 }) => {
+  const { colors } = useTheme();
+
   const getStatusColor = () => {
     switch (connectionStatus) {
-      case 'connected': return COLORS.success;
-      case 'connecting': return COLORS.warning;
-      case 'error': return COLORS.error;
-      default: return COLORS.textMuted;
+      case 'connected': return colors.success;
+      case 'connecting': return colors.warning;
+      case 'error': return colors.error;
+      default: return colors.textMuted;
     }
   };
 
@@ -52,22 +59,37 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
       <View style={styles.topBar}>
         {/* Hamburger Menu */}
         <TouchableOpacity onPress={onMenuPress} style={styles.menuBtn}>
-          <MaterialIcons name="menu" size={24} color={COLORS.text} />
+          <MaterialIcons name="menu" size={24} color={colors.text} />
         </TouchableOpacity>
         
         <View style={styles.logoContainer}>
-          <MaterialIcons name="candlestick-chart" size={22} color={COLORS.gold} />
-          <Text style={styles.logoText}>GOLD</Text>
-          <Text style={styles.logoAccent}>SCALPER</Text>
+          <MaterialIcons name="candlestick-chart" size={22} color={colors.gold} />
+          <Text style={[styles.logoText, { color: colors.text }]}>GOLD</Text>
+          <Text style={[styles.logoAccent, { color: colors.gold }]}>SCALPER</Text>
         </View>
         
-        <View style={styles.statusRow}>
-          <View style={[styles.statusDot, { backgroundColor: getStatusColor() }]} />
-          <Text style={[styles.statusText, { color: getStatusColor() }]}>{getStatusText()}</Text>
+        <View style={styles.rightSection}>
+          {/* News Bell */}
+          <TouchableOpacity onPress={onNewsPress} style={styles.bellBtn}>
+            <MaterialIcons name="notifications" size={20} color={colors.text} />
+            {upcomingNewsCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>
+                  {upcomingNewsCount > 9 ? '9+' : upcomingNewsCount}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+
+          {/* Status */}
+          <View style={styles.statusRow}>
+            <View style={[styles.statusDot, { backgroundColor: getStatusColor() }]} />
+            <Text style={[styles.statusText, { color: getStatusColor() }]}>{getStatusText()}</Text>
+          </View>
         </View>
       </View>
       
@@ -77,13 +99,13 @@ export const Header: React.FC<HeaderProps> = ({
           <View style={styles.accountInfo}>
             <View style={[
               styles.accountBadge,
-              { backgroundColor: accountType === 'demo' ? COLORS.gold : COLORS.error }
+              { backgroundColor: accountType === 'demo' ? colors.gold : colors.error }
             ]}>
-              <Text style={styles.accountBadgeText}>{accountType?.toUpperCase() || 'DEMO'}</Text>
+              <Text style={[styles.accountBadgeText, { color: colors.background }]}>{accountType?.toUpperCase() || 'DEMO'}</Text>
             </View>
-            <Text style={styles.accountId}>{getMaskedId()}</Text>
+            <Text style={[styles.accountId, { color: colors.textSecondary }]}>{getMaskedId()}</Text>
           </View>
-          <Text style={styles.balanceText}>${formatBalance()}</Text>
+          <Text style={[styles.balanceText, { color: colors.text }]}>${formatBalance()}</Text>
         </View>
       )}
     </View>
@@ -92,7 +114,7 @@ export const Header: React.FC<HeaderProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: 'transparent',
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
@@ -118,6 +140,36 @@ const styles = StyleSheet.create({
   },
   logoText: { ...FONTS.bold, fontSize: 15, color: COLORS.text, letterSpacing: 1 },
   logoAccent: { ...FONTS.bold, fontSize: 15, color: COLORS.gold, letterSpacing: 1 },
+  rightSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  bellBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  badge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    backgroundColor: COLORS.error,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    ...FONTS.bold,
+    fontSize: 9,
+    color: '#FFFFFF',
+  },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',

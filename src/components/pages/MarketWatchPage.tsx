@@ -2,6 +2,8 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { COLORS, FONTS, SIZES } from '../../constants/theme';
+import { useTheme } from '../../context/ThemeContext';
+import { SyntheticMarketData } from '../../hooks/useDerivWebSocket';
 
 interface MarketWatchPageProps {
   onBack: () => void;
@@ -23,6 +25,7 @@ interface MarketWatchPageProps {
   xauusdOnRetry?: () => void;
   gbpusdOnRetry?: () => void;
   audusdOnRetry?: () => void;
+  syntheticMarkets: SyntheticMarketData[];
 }
 
 export const MarketWatchPage: React.FC<MarketWatchPageProps> = ({
@@ -45,7 +48,10 @@ export const MarketWatchPage: React.FC<MarketWatchPageProps> = ({
   xauusdOnRetry,
   gbpusdOnRetry,
   audusdOnRetry,
+  syntheticMarkets,
 }) => {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const renderSymbolRow = (
     symbol: string, label: string, price: number, sma: number, 
     direction: string | null, trend: string | null, closedUntil?: Date | null, onRetry?: () => void
@@ -59,8 +65,8 @@ export const MarketWatchPage: React.FC<MarketWatchPageProps> = ({
       <View style={styles.symbolCard}>
         <View style={styles.symbolHeader}>
           <View style={styles.symbolInfo}>
-            <View style={[styles.iconWrap, isGold && { backgroundColor: COLORS.gold + '20' }]}>
-              <MaterialIcons name={isGold ? 'diamond' : 'currency-exchange'} size={18} color={isGold ? COLORS.gold : COLORS.primary} />
+            <View style={[styles.iconWrap, isGold && { backgroundColor: colors.gold + '20' }]}>
+              <MaterialIcons name={isGold ? 'diamond' : 'currency-exchange'} size={18} color={isGold ? colors.gold : colors.primary} />
             </View>
             <View>
               <Text style={styles.symbolName}>{symbol}</Text>
@@ -74,18 +80,18 @@ export const MarketWatchPage: React.FC<MarketWatchPageProps> = ({
         <View style={styles.symbolStats}>
           <View style={styles.statMini}>
             <Text style={styles.statMiniLabel}>SMA</Text>
-            <Text style={styles.statMiniValue}>{sma}</Text>
+            <Text style={styles.statMiniValue}>{sma > 0 ? smaStr : '---'}</Text>
           </View>
           <View style={styles.statMini}>
             <Text style={styles.statMiniLabel}>vs SMA</Text>
-            <Text style={[styles.statMiniValue, { color: aboveSma ? COLORS.long : COLORS.short }]}>
+            <Text style={[styles.statMiniValue, { color: aboveSma ? colors.long : colors.short }]}> 
               {aboveSma ? 'Above' : 'Below'}
             </Text>
           </View>
           <View style={styles.statMini}>
             <Text style={styles.statMiniLabel}>Signal</Text>
             <Text style={[styles.statMiniValue, { 
-              color: direction === 'BUY' ? COLORS.long : direction === 'SELL' ? COLORS.short : COLORS.textMuted 
+              color: direction === 'BUY' ? colors.long : direction === 'SELL' ? colors.short : colors.textMuted 
             }]}>
               {direction || 'NEUTRAL'}
             </Text>
@@ -93,7 +99,7 @@ export const MarketWatchPage: React.FC<MarketWatchPageProps> = ({
           <View style={styles.statMini}>
             <Text style={styles.statMiniLabel}>H4/D1</Text>
             <Text style={[styles.statMiniValue, { 
-              color: trend === 'BUY' ? COLORS.long : trend === 'SELL' ? COLORS.short : COLORS.textMuted 
+              color: trend === 'BUY' ? colors.long : trend === 'SELL' ? colors.short : colors.textMuted 
             }]}>
               {trend || '---'}
             </Text>
@@ -107,18 +113,30 @@ export const MarketWatchPage: React.FC<MarketWatchPageProps> = ({
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-          <MaterialIcons name="arrow-back" size={22} color={COLORS.text} />
+          <MaterialIcons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Market Watch</Text>
       </View>
       {renderSymbolRow('XAUUSD', 'Gold', xauusdPrice, xauusdSma, xauusdDirection, xauusdTrend, xauusdClosedUntil, xauusdOnRetry)}
       {renderSymbolRow('GBPUSD', 'British Pound / US Dollar', gbpusdPrice, gbpusdSma, gbpusdDirection, gbpusdTrend, gbpusdClosedUntil, gbpusdOnRetry)}
-      {renderSymbolRow('R_100', 'Volatility 100 Index', audusdPrice, audusdSma, audusdDirection, audusdTrend, audusdClosedUntil, audusdOnRetry)}
+      {renderSymbolRow('AUDUSD', 'Australian Dollar / US Dollar', audusdPrice, audusdSma, audusdDirection, audusdTrend, audusdClosedUntil, audusdOnRetry)}
+      {syntheticMarkets.map((market) => renderSymbolRow(
+        market.symbol,
+        market.symbol === 'R_100' ? 'Volatility 100 Index' : 'Synthetic Index',
+        market.price,
+        market.sma,
+        market.direction,
+        null,
+        null,
+        undefined,
+      ))}
     </ScrollView>
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: typeof COLORS) => {
+  const COLORS = colors;
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
@@ -153,4 +171,5 @@ const styles = StyleSheet.create({
   statMini: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRightWidth: 1, borderRightColor: COLORS.border },
   statMiniLabel: { ...FONTS.regular, fontSize: 10, color: COLORS.textMuted, marginBottom: 4 },
   statMiniValue: { ...FONTS.semibold, fontSize: 12, color: COLORS.text },
-});
+  });
+};

@@ -51,7 +51,7 @@ export interface DerivTransaction {
 }
 
 // App Types
-export type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
+export type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected' | 'cooldown';
 
 export type MarketContext = 'LONG' | 'SHORT' | 'NEUTRAL';
 
@@ -168,4 +168,27 @@ export interface ErrorResponse {
     code: string;
     message: string;
   };
+}
+
+// ── Trade Journal ──────────────────────────────────────────────────
+export interface JournalEntry {
+  id: string;
+  timestamp_signal: string;          // ISO 8601
+  timestamp_execution: string | null; // ISO 8601, null until executed
+  symbol: string;
+  direction: 'CALL' | 'PUT' | 'BUY' | 'SELL';
+  signal_reason: string;             // which conditions fired
+  confidence_score: number;
+  htf_trend: string;                 // "H4:BUY D1:BUY" or "H4:NEUTRAL D1:SELL"
+  ltf_context: string;               // "M5:BUY at 2345.67"
+  entry_price: number;
+  stake: number;
+  payout_percent: number | null;
+  expiry_seconds: number;
+  predicted_outcome: string | null;  // null until resolved
+  actual_outcome: 'win' | 'loss' | 'not_executed' | null;
+  profit: number;                    // signed
+  latency_ms: number;                // signal → execution
+  market_closed_at_entry: boolean;
+  paper_trade: boolean;
 }

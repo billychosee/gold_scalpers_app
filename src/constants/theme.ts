@@ -1,39 +1,80 @@
-// Deriv-inspired professional trading theme
-export const COLORS = {
+// ── Color palettes ─────────────────────────────────────────────────
+export type ColorPalette = typeof darkColors;
+
+export const darkColors = {
   // Primary colors - Deriv red/coral
-  primary: '#FF444F', // Deriv red
+  primary: '#FF444F',
   primaryDark: '#E53935',
   secondary: '#00D4FF',
-  
-  // Background colors - Clean dark theme
-  background: '#1A1A2E', // Deep navy background
-  surface: '#16213E', // Card background
-  surfaceLight: '#1E2D4A', // Lighter surface
-  
+
+  // Background colors
+  background: '#1A1A2E',
+  surface: '#16213E',
+  surfaceLight: '#1E2D4A',
+
   // Text colors
   text: '#FFFFFF',
-  textSecondary: '#A0AEC0', // Muted blue-gray
+  textSecondary: '#A0AEC0',
   textMuted: '#6B7280',
-  
+
   // Status colors
-  success: '#10B981', // Emerald green
-  error: '#EF4444', // Red
-  warning: '#F59E0B', // Amber
-  demo: '#FFD700', // Gold for demo
-  real: '#EF4444', // Red for real
-  
+  success: '#10B981',
+  error: '#EF4444',
+  warning: '#F59E0B',
+  demo: '#FFD700',
+  real: '#EF4444',
+
   // Trading colors
-  long: '#10B981', // Green for BUY
-  short: '#EF4444', // Red for SELL
-  
+  long: '#10B981',
+  short: '#EF4444',
+
   // Borders
   border: '#2D3748',
   borderLight: '#4A5568',
-  
-  // Gold accent (for branding)
+
+  // Gold accent
   gold: '#FFD700',
   goldDark: '#B8860B',
 };
+
+export const lightColors: ColorPalette = {
+  // Primary colors
+  primary: '#FF444F',
+  primaryDark: '#E53935',
+  secondary: '#0099CC',
+
+  // Background colors
+  background: '#F5F5F5',
+  surface: '#FFFFFF',
+  surfaceLight: '#F0F0F0',
+
+  // Text colors
+  text: '#1A1A2E',
+  textSecondary: '#4A5568',
+  textMuted: '#9CA3AF',
+
+  // Status colors
+  success: '#059669',
+  error: '#DC2626',
+  warning: '#D97706',
+  demo: '#B8860B',
+  real: '#DC2626',
+
+  // Trading colors
+  long: '#059669',
+  short: '#DC2626',
+
+  // Borders
+  border: '#E2E8F0',
+  borderLight: '#CBD5E1',
+
+  // Gold accent
+  gold: '#B8860B',
+  goldDark: '#92400E',
+};
+
+// Default COLORS export for backward compatibility (dark theme)
+export const COLORS = darkColors;
 
 export const FONTS = {
   regular: {
@@ -113,6 +154,9 @@ export const TRADING_CONFIG = {
   MAX_RECONNECT_ATTEMPTS: 5,
 };
 
+// Paper trading mode — reads from .env
+export const PAPER_TRADING = process.env.EXPO_PUBLIC_PAPER_TRADING === 'true';
+
 // Deriv API configuration — secrets MUST come from .env only
 export const DERIV_CONFIG = {
   WS_URL: 'wss://ws.derivws.com/websockets/v3',
@@ -127,4 +171,21 @@ export const SYMBOLS = {
   GBPUSD: 'frxGBPUSD',
   AUDUSD: 'frxAUDUSD',
   R_100: 'R_100',
+  R_10: 'R_10',
+  R_25: 'R_25',
+  R_50: 'R_50',
+  R_75: 'R_75',
+  V_15_1S: '1HZ15V',
+  V_30_1S: '1HZ30V',
+  V_90_1S: '1HZ90V',
+  CRASH_500: 'BOOM500',
+  CRASH_600: 'BOOM600',
+  BOOM_500: 'CRASH500',
+  BOOM_600: 'CRASH600',
 };
+
+export const SYNTHETIC_SYMBOL_KEYS = [
+  'R_100', 'R_10', 'R_25', 'R_50', 'R_75',
+  'V_15_1S', 'V_30_1S', 'V_90_1S',
+  'CRASH_500', 'CRASH_600', 'BOOM_500', 'BOOM_600',
+] as const;

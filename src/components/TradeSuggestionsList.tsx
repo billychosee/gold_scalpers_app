@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
 import { TradeSuggestion } from '../types';
 import { TradeSuggestionCard } from './TradeSuggestionCard';
 
@@ -14,6 +15,8 @@ export const TradeSuggestionsList: React.FC<TradeSuggestionsListProps> = ({
   suggestions,
   onExecute,
 }) => {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconContainer}>
@@ -62,7 +65,9 @@ export const TradeSuggestionsList: React.FC<TradeSuggestionsListProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: typeof COLORS) => {
+  const COLORS = colors;
+  return StyleSheet.create({
   container: {
     flex: 1,
     marginTop: SIZES.paddingMedium,
@@ -154,4 +159,5 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: COLORS.textMuted,
   },
-});
+  });
+};

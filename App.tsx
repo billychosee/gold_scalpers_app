@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView, RefreshControl, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, Alert, TouchableOpacity } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { COLORS, SIZES, SYMBOLS } from './src/constants/theme';
+import { COLORS, FONTS, SIZES, SYMBOLS } from './src/constants/theme';
+import { useTheme, ThemeProvider } from './src/context/ThemeContext';
 import { useDerivWebSocket } from './src/hooks/useDerivWebSocket';
+import { getUpcomingEvents } from './src/services/NewsFilter';
 import { Header } from './src/components/Header';
 import { BalanceCard } from './src/components/BalanceCard';
 import { MarketDataCard } from './src/components/MarketDataCard';
@@ -15,8 +17,16 @@ import { SettingsPage } from './src/components/pages/SettingsPage';
 import { MarketWatchPage } from './src/components/pages/MarketWatchPage';
 import { AboutPage } from './src/components/pages/AboutPage';
 import { TradeHistoryPage } from './src/components/pages/TradeHistoryPage';
+import { TradeJournalPage } from './src/components/pages/TradeJournalPage';
+import { TradingModeBanner } from './src/components/TradingModeBanner';
+import { NewsModal } from './src/components/NewsModal';
+import { NewsPage } from './src/components/pages/NewsPage';
+import { SymbolManagerPage } from './src/components/pages/SymbolManagerPage';
 
-export default function App() {
+// Inner app component that consumes the theme context
+function AppContent() {
+  const { colors, themeMode, setThemeMode } = useTheme();
+  const effectiveTheme = themeMode === 'system' ? 'dark' : themeMode; // simplified for StatusBar
   const {
     connectionStatus,
     activeLoginId,
@@ -25,6 +35,19 @@ export default function App() {
     error,
     balance,
     profitTable,
+    isPaperTrading,
+    togglePaperTrading,
+    inCooldown,
+    cooldownRemainingSec,
+    manualRetry,
+    blockedSymbols,
+    nextNewsEvent,
+    minutesUntilNews,
+    refreshNews,
+    discoveredSymbols,
+    activeSymbols,
+    toggleSymbol,
+    refreshSymbols,
     xauusdPrice,
     gbpusdPrice,
     audusdPrice,
@@ -41,6 +64,7 @@ export default function App() {
     gbpusdTrend,
     audusdTrend,
     r100Trend,
+    syntheticMarkets,
     suggestions,
     activePositions,
     connect,
@@ -58,6 +82,7 @@ export default function App() {
 
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [activePage, setActivePage] = useState<string | null>(null);
+  const [newsModalVisible, setNewsModalVisible] = useState(false);
 
   useEffect(() => {
     if (error) {
@@ -97,33 +122,65 @@ export default function App() {
   if (activePage) {
     return (
       <SafeAreaProvider>
-        <SafeAreaView style={styles.safeArea}>
-          <StatusBar style="light" />
-          <View style={styles.container}>
+        <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+          <StatusBar style={effectiveTheme === 'dark' ? 'light' : 'dark'} />
+          <View style={[styles.container, { backgroundColor: colors.background }]}>
             {activePage === 'settings' && (
-              <SettingsPage onBack={() => setActivePage(null)} />
+              <SettingsPage
+                onBack={() => setActivePage(null)}
+                onViewJournal={() => setActivePage('journal')}
+                onViewSymbols={() => setActivePage('symbols')}
+                paperTrading={isPaperTrading}
+                onTogglePaperTrading={togglePaperTrading}
+                themeMode={themeMode}
+                onSetThemeMode={setThemeMode}
+                upcomingEvents={getUpcomingEvents()}
+                onRefreshNews={refreshNews}
+                activeSymbolCount={activeSymbols.length}
+                discoveredSymbolCount={discoveredSymbols.length}
+              />
+            )}
+            {activePage === 'journal' && (
+              <TradeJournalPage onBack={() => setActivePage('settings')} />
+            )}
+            {activePage === 'news' && (
+              <NewsPage
+                onBack={() => setActivePage(null)}
+                events={getUpcomingEvents(72)}
+                onRefresh={refreshNews}
+              />
+            )}
+            {activePage === 'symbols' && (
+              <SymbolManagerPage
+                onBack={() => setActivePage(null)}
+                discoveredSymbols={discoveredSymbols}
+                activeSymbols={activeSymbols}
+                onToggleSymbol={toggleSymbol}
+                onRefresh={refreshSymbols}
+              />
             )}
             {activePage === 'market' && (
               <MarketWatchPage 
                 onBack={() => setActivePage(null)}
                 xauusdPrice={xauusdPrice}
                 gbpusdPrice={gbpusdPrice}
-                audusdPrice={r100Price}
+                audusdPrice={audusdPrice}
                 xauusdSma={xauusdSma}
                 gbpusdSma={gbpusdSma}
-                audusdSma={r100Sma}
+                audusdSma={audusdSma}
                 xauusdDirection={xauusdDirection}
                 gbpusdDirection={gbpusdDirection}
-                audusdDirection={r100Direction}
+                audusdDirection={audusdDirection}
                 xauusdTrend={xauusdTrend}
                 gbpusdTrend={gbpusdTrend}
-                audusdTrend={r100Trend}
+                audusdTrend={audusdTrend}
                 xauusdClosedUntil={xauusdClosedUntil}
                 gbpusdClosedUntil={gbpusdClosedUntil}
                 audusdClosedUntil={null}
                 xauusdOnRetry={() => retrySubscribe(SYMBOLS.XAUUSD)}
                 gbpusdOnRetry={() => retrySubscribe(SYMBOLS.GBPUSD)}
-                audusdOnRetry={() => retrySubscribe(SYMBOLS.R_100)}
+                audusdOnRetry={() => retrySubscribe(SYMBOLS.AUDUSD)}
+                syntheticMarkets={syntheticMarkets}
               />
             )}
             {activePage === 'about' && (
@@ -141,6 +198,8 @@ export default function App() {
                   accountType={accountType}
                   balance={balance}
                   onMenuPress={() => setDrawerVisible(true)}
+                  upcomingNewsCount={blockedSymbols.length > 0 ? blockedSymbols.length : getUpcomingEvents(24).length}
+                  onNewsPress={() => setNewsModalVisible(true)}
                 />
                 <TradeSuggestionsList
                   suggestions={suggestions}
@@ -162,10 +221,10 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={styles.safeArea}>
-        <StatusBar style="light" />
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+        <StatusBar style={effectiveTheme === 'dark' ? 'light' : 'dark'} />
         
-        <View style={styles.container}>
+        <View style={[styles.container, { backgroundColor: colors.background }]}>
           <Header
             connectionStatus={connectionStatus}
             isVirtual={isVirtual}
@@ -173,7 +232,41 @@ export default function App() {
             accountType={accountType}
             balance={balance}
             onMenuPress={() => setDrawerVisible(true)}
+            upcomingNewsCount={blockedSymbols.length > 0 ? blockedSymbols.length : getUpcomingEvents(24).length}
+            onNewsPress={() => setNewsModalVisible(true)}
           />
+          <TradingModeBanner
+            isPaperTrading={isPaperTrading}
+            accountType={accountType}
+          />
+
+          {/* Cooldown / Connection lost banner */}
+          {inCooldown && (
+              <View style={[styles.cooldownBanner, { backgroundColor: colors.warning }]}>
+              <Text style={[styles.cooldownText, { color: colors.background }]}>
+                Too many reconnect attempts — waiting {cooldownRemainingSec}s before retrying
+              </Text>
+            </View>
+          )}
+          {!inCooldown && connectionStatus === 'disconnected' && (
+            <TouchableOpacity style={[styles.retryBanner, { backgroundColor: colors.error }]} onPress={manualRetry}>
+              <Text style={styles.retryText}>Connection lost — tap to retry</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* News danger window banner */}
+          {blockedSymbols.length > 0 && nextNewsEvent && (
+            <View style={styles.newsBanner}>
+              <Text style={styles.newsBannerText}>
+                ⚠️ {nextNewsEvent.title} ({nextNewsEvent.currency})
+                {minutesUntilNews !== null && minutesUntilNews > 0
+                  ? ` in ${Math.ceil(minutesUntilNews)} min`
+                  : ' — active'}
+                {' — '}
+                {blockedSymbols.map(s => s.replace('frx', '')).join(', ')} signals paused
+              </Text>
+            </View>
+          )}
           
           <ScrollView
             style={styles.scrollView}
@@ -183,8 +276,8 @@ export default function App() {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={onRefresh}
-                tintColor={COLORS.primary}
-                colors={[COLORS.primary]}
+                tintColor={colors.primary}
+                colors={[colors.primary]}
               />
             }
           >
@@ -249,6 +342,14 @@ export default function App() {
           activePage={activePage}
           onMenuSelect={handleMenuSelect}
         />
+
+        {/* News bell popup modal */}
+        <NewsModal
+          visible={newsModalVisible}
+          onClose={() => setNewsModalVisible(false)}
+          events={getUpcomingEvents(48)}
+          onViewAll={() => setActivePage('news')}
+        />
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -269,4 +370,47 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: SIZES.paddingLarge,
   },
+  cooldownBanner: {
+    backgroundColor: '#F59E0B',
+    paddingVertical: 8,
+    paddingHorizontal: SIZES.paddingMedium,
+    alignItems: 'center',
+  },
+  cooldownText: {
+    ...FONTS.semibold,
+    fontSize: 12,
+    color: '#1A1A2E',
+  },
+  retryBanner: {
+    backgroundColor: COLORS.error,
+    paddingVertical: 10,
+    paddingHorizontal: SIZES.paddingMedium,
+    alignItems: 'center',
+  },
+  retryText: {
+    ...FONTS.semibold,
+    fontSize: 13,
+    color: '#FFFFFF',
+  },
+  newsBanner: {
+    backgroundColor: '#DC2626',
+    paddingVertical: 8,
+    paddingHorizontal: SIZES.paddingMedium,
+    alignItems: 'center',
+  },
+  newsBannerText: {
+    ...FONTS.semibold,
+    fontSize: 11,
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
 });
+
+// Default export wraps everything with ThemeProvider
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
+  );
+}

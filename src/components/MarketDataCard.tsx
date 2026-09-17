@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
 import { TradeDirection } from '../types';
 
 interface MarketDataCardProps {
@@ -18,11 +19,13 @@ interface MarketDataCardProps {
 export const MarketDataCard: React.FC<MarketDataCardProps> = ({
   symbol, price, sma, direction, higherTrend, label, closedUntil, onRetry,
 }) => {
+  const { colors } = useTheme();
+
   const getDirectionColor = () => {
     switch (direction) {
-      case 'BUY': return COLORS.long;
-      case 'SELL': return COLORS.short;
-      default: return COLORS.textMuted;
+      case 'BUY': return colors.long;
+      case 'SELL': return colors.short;
+      default: return colors.textMuted;
     }
   };
 
@@ -34,37 +37,37 @@ export const MarketDataCard: React.FC<MarketDataCardProps> = ({
   const isGold = symbol.includes('XAU');
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <View style={styles.row}>
         <View style={styles.left}>
           <View style={styles.symbolRow}>
-            <MaterialIcons name={isGold ? 'diamond' : 'currency-exchange'} size={14} color={isGold ? COLORS.gold : COLORS.primary} />
-            <Text style={styles.symbol}>{symbol}</Text>
+            <MaterialIcons name={isGold ? 'diamond' : 'currency-exchange'} size={14} color={isGold ? colors.gold : colors.primary} />
+            <Text style={[styles.symbol, { color: colors.text }]}>{symbol}</Text>
             <View style={[styles.dirBadge, { backgroundColor: getDirectionColor() + '20' }]}>
               <Text style={[styles.dirText, { color: getDirectionColor() }]}>{direction || '---'}</Text>
             </View>
             {higherTrend && (
-              <View style={[styles.trendBadge, { backgroundColor: higherTrend === 'BUY' ? COLORS.long + '20' : COLORS.short + '20' }]}>
-                <Text style={[styles.trendText, { color: higherTrend === 'BUY' ? COLORS.long : COLORS.short }]}>H4/D1 {higherTrend}</Text>
+              <View style={[styles.trendBadge, { backgroundColor: higherTrend === 'BUY' ? colors.long + '20' : colors.short + '20' }]}>
+                <Text style={[styles.trendText, { color: higherTrend === 'BUY' ? colors.long : colors.short }]}>H4/D1 {higherTrend}</Text>
               </View>
             )}
           </View>
-          <Text style={styles.label}>{label}</Text>
+          <Text style={[styles.label, { color: colors.textMuted }]}>{label}</Text>
         </View>
         <View style={styles.priceCol}>
           {closedUntil ? (
             <View style={{ alignItems: 'flex-end' }}>
               <Text style={styles.price}>Market closed — reopens at {new Date(closedUntil).toLocaleString()}</Text>
               {onRetry && (
-                <TouchableOpacity style={styles.retryBtn} onPress={onRetry}>
+                  <TouchableOpacity style={[styles.retryBtn, { backgroundColor: colors.primary }]} onPress={onRetry}>
                   <Text style={styles.retryText}>Retry now</Text>
                 </TouchableOpacity>
               )}
             </View>
           ) : (
             <>
-              <Text style={styles.price}>{formatPrice(price)}</Text>
-              {sma > 0 && <Text style={styles.sma}>SMA {formatPrice(sma)}</Text>}
+              <Text style={[styles.price, { color: colors.text }]}>{formatPrice(price)}</Text>
+              {sma > 0 && <Text style={[styles.sma, { color: colors.textMuted }]}>SMA {formatPrice(sma)}</Text>}
             </>
           )}
         </View>

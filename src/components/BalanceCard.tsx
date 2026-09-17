@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
 import { DerivBalance } from '../types';
 
 interface BalanceCardProps {
@@ -10,32 +11,34 @@ interface BalanceCardProps {
 }
 
 export const BalanceCard: React.FC<BalanceCardProps> = ({ balance, onRefresh }) => {
+  const { colors } = useTheme();
+
   const formatBalance = (amount: number | string) => {
     const num = typeof amount === 'string' ? parseFloat(amount) : amount;
     return `$${(isNaN(num) ? 0 : num).toFixed(2)}`;
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <View style={styles.row}>
         <View style={styles.left}>
           <View style={styles.labelRow}>
-            <MaterialIcons name="account-balance-wallet" size={14} color={COLORS.gold} />
-            <Text style={styles.label}>Portfolio</Text>
+            <MaterialIcons name="account-balance-wallet" size={14} color={colors.gold} />
+            <Text style={[styles.label, { color: colors.textMuted }]}>Portfolio</Text>
           </View>
-          <Text style={styles.balance}>
+          <Text style={[styles.balance, { color: colors.text }]}>
             {balance ? formatBalance(balance.balance) : '$0.00'}
           </Text>
         </View>
-        <TouchableOpacity onPress={onRefresh} style={styles.refreshBtn}>
-          <Ionicons name="refresh" size={16} color={COLORS.primary} />
+        <TouchableOpacity onPress={onRefresh} style={[styles.refreshBtn, { backgroundColor: colors.surfaceLight }]}>
+          <Ionicons name="refresh" size={16} color={colors.primary} />
         </TouchableOpacity>
       </View>
       {balance && (
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>{balance.currency}</Text>
-          <Text style={styles.footerDot}>|</Text>
-          <Text style={styles.footerText}>{balance.loginid}</Text>
+        <View style={[styles.footer, { borderTopColor: colors.border }]}>
+          <Text style={[styles.footerText, { color: colors.textMuted }]}>{balance.currency}</Text>
+          <Text style={[styles.footerDot, { color: colors.border }]}>|</Text>
+          <Text style={[styles.footerText, { color: colors.textMuted }]}>{balance.loginid}</Text>
         </View>
       )}
     </View>

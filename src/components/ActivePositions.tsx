@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert } from 'react-native';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
 import { ActivePosition } from '../types';
 
 interface ActivePositionsProps {
@@ -10,6 +11,8 @@ interface ActivePositionsProps {
 }
 
 export const ActivePositions: React.FC<ActivePositionsProps> = ({ positions, onClose }) => {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const formatPrice = (value: number, symbol: string) => {
     if (symbol.includes('XAUUSD')) return value.toFixed(2);
     return value.toFixed(4);
@@ -98,7 +101,9 @@ export const ActivePositions: React.FC<ActivePositionsProps> = ({ positions, onC
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: typeof COLORS) => {
+  const COLORS = colors;
+  return StyleSheet.create({
   container: {
     marginTop: SIZES.paddingSmall,
     marginHorizontal: SIZES.paddingMedium,
@@ -138,4 +143,5 @@ const styles = StyleSheet.create({
     paddingVertical: SIZES.paddingMedium, alignItems: 'center', gap: 4,
   },
   emptyText: { ...FONTS.regular, fontSize: 11, color: COLORS.textMuted },
-});
+  });
+};

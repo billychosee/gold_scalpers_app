@@ -39,6 +39,14 @@ interface OptionsApiResponse<T> {
   };
 }
 
+// Reconnect backoff: 10s, 30s, 60s
+const RECONNECT_DELAYS = [10_000, 30_000, 60_000];
+const MAX_RECONNECT_ATTEMPTS = RECONNECT_DELAYS.length;
+// Rate limit: if >10 reconnects in 5 minutes, cooldown 15 minutes
+const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+const RATE_LIMIT_MAX_ATTEMPTS = 10;
+const COOLDOWN_DURATION_MS = 15 * 60 * 1000;
+
 class DerivWebSocketService {
   private ws: WebSocket | null = null;
   private publicWs: WebSocket | null = null;
@@ -51,10 +59,16 @@ class DerivWebSocketService {
   private publicReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private isConnecting = false;
   private isManualDisconnect = false;
+  private intentionalDisconnect = false;
   private isRateLimited = false;
   private rateLimitTimer: ReturnType<typeof setTimeout> | null = null;
+  // Rate limit tracking: timestamps of recent reconnect attempts
+  private recentReconnectTimestamps: number[] = [];
+  private cooldownEndTime: number = 0;
   // Timestamp of the most recent subscribe attempt; used to avoid rapid reconnect loops
   private lastSubscribeAt: number | null = null;
+  private tickSubscriptions = new Set<string>();
+  private subscriptionIds = new Map<string, string>(); // symbol → subscription ID
   private tokenId: string = DERIV_CONFIG.API_TOKEN;
   private appId: string = DERIV_CONFIG.APP_ID;
   private accountId: string | null = null;
@@ -195,6 +209,11 @@ class DerivWebSocketService {
       this.publicWs.onopen = () => {
         this.publicReconnectAttempts = 0;
         console.log('[Public WS] Connected');
+        this.tickSubscriptions.forEach((symbol) => {
+          this.subscribeTicks(symbol);
+        });
+        // Request active symbols list
+        this.requestActiveSymbols();
         resolve();
       };
 
@@ -225,22 +244,20 @@ class DerivWebSocketService {
       };
 
       this.publicWs.onclose = (event) => {
-        console.log('[Public WS] Closed', event.code, event.reason, (event as any).wasClean);
-        console.trace('[Public WS] Close triggered by:');
+        console.log(
+          `[Public WS] Closed code=${event.code} reason="${event.reason}" wasClean=${(event as any).wasClean}`,
+        );
+        try { throw new Error('public-ws-close-trace'); } catch (e) {
+          console.error('[Public WS] Close stack:\n' + (e as Error).stack);
+        }
         if (this.isManualDisconnect) return;
-        if (this.publicReconnectAttempts >= 3) {
-          console.log('[Public WS] Giving up after 3 reconnect attempts');
+
+        if (this.intentionalDisconnect) {
+          console.log('[Public WS] Intentional disconnect — not reconnecting');
           return;
         }
-        if (this.publicReconnectTimer) clearTimeout(this.publicReconnectTimer);
-        this.publicReconnectAttempts += 1;
-        const delay = Math.min(3000 * this.publicReconnectAttempts, 15000);
-        console.log(`[Public WS] Reconnect attempt ${this.publicReconnectAttempts}/3 in ${delay}ms`);
-        this.publicReconnectTimer = setTimeout(() => {
-          this.connectPublicSocket().catch((err) => {
-            console.error('[Public WS] Reconnect failed:', err);
-          });
-        }, delay);
+
+        this.scheduleReconnect('public');
       };
     });
   }
@@ -269,6 +286,7 @@ class DerivWebSocketService {
 
     this.isConnecting = true;
     this.isManualDisconnect = false;
+    this.intentionalDisconnect = false;
     this.notifyConnectionStatus('connecting');
 
     try {
@@ -290,6 +308,8 @@ class DerivWebSocketService {
 
       this.ws.onopen = () => {
         this.authReconnectAttempts = 0;
+        this.recentReconnectTimestamps = [];
+        this.cooldownEndTime = 0;
         this.isConnecting = false;
         console.log('[Auth WS] Connected');
         this.notifyConnectionStatus('connected');
@@ -331,25 +351,23 @@ class DerivWebSocketService {
       };
 
       this.ws.onclose = (event) => {
-        console.log('[Auth WS] Closed', event.code, event.reason, (event as any).wasClean);
-        console.trace('[Auth WS] Close triggered by:');
+        console.log(
+          `[Auth WS] Closed code=${event.code} reason="${event.reason}" wasClean=${(event as any).wasClean}`,
+        );
+        try { throw new Error('auth-ws-close-trace'); } catch (e) {
+          console.error('[Auth WS] Close stack:\n' + (e as Error).stack);
+        }
         this.isConnecting = false;
         this.notifyConnectionStatus('disconnected');
 
         if (this.isManualDisconnect) return;
-        if (this.authReconnectAttempts >= 3) {
-          console.log('[Auth WS] Giving up after 3 reconnect attempts');
+
+        if (this.intentionalDisconnect) {
+          console.log('[Auth WS] Intentional disconnect — not reconnecting');
           return;
         }
-        if (this.authReconnectTimer) clearTimeout(this.authReconnectTimer);
-        this.authReconnectAttempts += 1;
-        const delay = Math.min(3000 * this.authReconnectAttempts, 15000);
-        console.log(`[Auth WS] Reconnect attempt ${this.authReconnectAttempts}/3 in ${delay}ms`);
-        this.authReconnectTimer = setTimeout(() => {
-          this.connect().catch((err) => {
-            console.error('[Auth WS] Reconnect failed:', err);
-          });
-        }, delay);
+
+        this.scheduleReconnect('auth');
       };
     } catch (error) {
       this.isConnecting = false;
@@ -373,10 +391,111 @@ class DerivWebSocketService {
     }
   }
 
+  // ── Reconnect with dramatic backoff + rate limit protection ──────
+
+  private scheduleReconnect(socket: 'auth' | 'public'): void {
+    const now = Date.now();
+
+    // Prune old timestamps outside the rate limit window
+    this.recentReconnectTimestamps = this.recentReconnectTimestamps.filter(
+      (ts) => now - ts < RATE_LIMIT_WINDOW_MS,
+    );
+
+    // Check if we've hit the rate limit
+    if (this.recentReconnectTimestamps.length >= RATE_LIMIT_MAX_ATTEMPTS) {
+      this.cooldownEndTime = now + COOLDOWN_DURATION_MS;
+      console.warn(
+        `[Reconnect] RATE LIMITED: ${this.recentReconnectTimestamps.length} attempts in ` +
+        `${RATE_LIMIT_WINDOW_MS / 1000}s — entering 15-minute cooldown`,
+      );
+      this.notifyConnectionStatus('cooldown');
+      return;
+    }
+
+    // Check if we're still in cooldown
+    if (now < this.cooldownEndTime) {
+      const remaining = Math.ceil((this.cooldownEndTime - now) / 1000);
+      console.warn(`[Reconnect] Still in cooldown — ${remaining}s remaining`);
+      this.notifyConnectionStatus('cooldown');
+      return;
+    }
+
+    // Record this attempt
+    this.recentReconnectTimestamps.push(now);
+
+    const attempts = socket === 'auth' ? this.authReconnectAttempts : this.publicReconnectAttempts;
+    const maxAttempts = MAX_RECONNECT_ATTEMPTS;
+
+    if (attempts >= maxAttempts) {
+      console.warn(`[Reconnect] ${socket} giving up after ${maxAttempts} attempts — "Connection lost — tap to retry"`);
+      this.notifyConnectionStatus('disconnected');
+      return;
+    }
+
+    const delay = RECONNECT_DELAYS[attempts];
+    console.log(`[Reconnect] ${socket} attempt ${attempts + 1}/${maxAttempts} in ${delay / 1000}s`);
+
+    if (socket === 'auth') {
+      this.authReconnectAttempts += 1;
+      if (this.authReconnectTimer) clearTimeout(this.authReconnectTimer);
+      this.authReconnectTimer = setTimeout(() => {
+        this.connect().catch((err) => {
+          console.error('[Reconnect] Auth reconnect failed:', err);
+        });
+      }, delay);
+    } else {
+      this.publicReconnectAttempts += 1;
+      if (this.publicReconnectTimer) clearTimeout(this.publicReconnectTimer);
+      this.publicReconnectTimer = setTimeout(() => {
+        this.connectPublicSocket().catch((err) => {
+          console.error('[Reconnect] Public reconnect failed:', err);
+        });
+      }, delay);
+    }
+  }
+
+  /** Get current connection state for the UI. */
+  getConnectionState(): {
+    authConnected: boolean;
+    publicConnected: boolean;
+    inCooldown: boolean;
+    cooldownRemainingSec: number;
+    reconnectAttempts: number;
+    canRetry: boolean;
+  } {
+    const now = Date.now();
+    const inCooldown = now < this.cooldownEndTime;
+    const cooldownRemainingSec = inCooldown
+      ? Math.ceil((this.cooldownEndTime - now) / 1000)
+      : 0;
+    const totalAttempts = this.authReconnectAttempts + this.publicReconnectAttempts;
+    return {
+      authConnected: this.ws?.readyState === WebSocket.OPEN,
+      publicConnected: this.publicWs?.readyState === WebSocket.OPEN,
+      inCooldown,
+      cooldownRemainingSec,
+      reconnectAttempts: totalAttempts,
+      canRetry: !inCooldown && !this.isConnecting && totalAttempts < MAX_RECONNECT_ATTEMPTS * 2,
+    };
+  }
+
+  /** Manual retry — resets attempts and tries immediately. */
+  manualRetry(): void {
+    console.log('[Reconnect] Manual retry requested');
+    this.authReconnectAttempts = 0;
+    this.publicReconnectAttempts = 0;
+    this.cooldownEndTime = 0;
+    this.recentReconnectTimestamps = [];
+    this.connect().catch((err) => {
+      console.error('[Reconnect] Manual retry failed:', err);
+    });
+  }
+
   // Disconnect from WebSocket
   disconnect(): void {
     console.log('[Disconnect] Manual disconnect');
     this.isManualDisconnect = true;
+    this.intentionalDisconnect = true;
     this.isConnecting = false;
     this.isRateLimited = false;
     
@@ -432,6 +551,16 @@ class DerivWebSocketService {
     // Normalize message type: Deriv Options WS uses 'ticks' msg_type but app expects 'tick'
     const originalType = (message as any).msg_type;
     const msg_type = originalType === 'ticks' ? 'tick' : originalType;
+
+    // Capture subscription IDs from tick responses
+    if (msg_type === 'tick' && (message as any).tick?.symbol && (message as any).subscription?.id) {
+      const sym = (message as any).tick.symbol;
+      const subId = (message as any).subscription.id;
+      if (!this.subscriptionIds.has(sym)) {
+        this.subscriptionIds.set(sym, subId);
+        console.log(`[Public WS] Captured subscription ID for ${sym}: ${subId}`);
+      }
+    }
 
     // Log subscription errors and ticks (STEP 4)
     try {
@@ -521,10 +650,11 @@ class DerivWebSocketService {
   }
 
   // Subscribe to ticks via the dedicated public market-data socket.
-  // This must only send when the public socket is already open; do not trigger a nested reconnect loop.
   subscribeTicks(symbol: string): void {
+    this.tickSubscriptions.add(symbol);
+
     if (this.publicWs?.readyState !== WebSocket.OPEN) {
-      console.log('[Public WS] Skipping subscribe; socket is not open yet:', symbol);
+      console.log('[Public WS] Queued subscribe until socket is open:', symbol);
       return;
     }
 
@@ -541,11 +671,31 @@ class DerivWebSocketService {
 
   // Unsubscribe from ticks
   unsubscribeTicks(symbol: string): void {
-    if (this.publicWs?.readyState === WebSocket.OPEN) {
-      this.sendPublic({
-        forget: symbol,
-      });
+    this.tickSubscriptions.delete(symbol);
+    // Send forget request if we have the subscription ID
+    const subId = this.subscriptionIds.get(symbol);
+    if (subId && this.publicWs?.readyState === WebSocket.OPEN) {
+      try {
+        this.sendPublic({ forget: subId });
+        console.log(`[Public WS] Forgotten subscription: ${symbol} (${subId})`);
+      } catch (err) {
+        console.warn(`[Public WS] Failed to forget ${symbol}:`, err);
+      }
     }
+    this.subscriptionIds.delete(symbol);
+  }
+
+  // Request active symbols list from Deriv
+  requestActiveSymbols(): void {
+    if (this.publicWs?.readyState !== WebSocket.OPEN) {
+      console.log('[Public WS] Cannot request active symbols — socket not open');
+      return;
+    }
+    console.log('[Public WS] Requesting active symbols...');
+    this.sendPublic({
+      active_symbols: 'brief',
+      product_type: 'basic',
+    });
   }
 
   // Get balance
@@ -641,6 +791,15 @@ class DerivWebSocketService {
         
         if (response.candles) {
           console.log(`[Candles] Got ${response.candles.length} candles for ${symbol} g=${granularity}`);
+          if (response.candles.length >= 2) {
+            const first = response.candles[0];
+            const last = response.candles[response.candles.length - 1];
+            const order = first.epoch < last.epoch ? 'OLDEST_FIRST' : 'NEWEST_FIRST';
+            console.log(
+              `[Candles] first epoch: ${first.epoch} close=${first.close}, ` +
+              `last epoch: ${last.epoch} close=${last.close} → ${order}`
+            );
+          }
           resolve(response.candles);
         } else if (response.error) {
           reject(new Error(response.error.message));

@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
 import { TradeSuggestion } from '../types';
 
 interface TradeSuggestionCardProps {
@@ -14,6 +15,8 @@ export const TradeSuggestionCard: React.FC<TradeSuggestionCardProps> = ({
   suggestion,
   onExecute,
 }) => {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const formatPrice = (value: number) => {
     if (suggestion.symbol.includes('XAUUSD')) return value.toFixed(2);
     return value.toFixed(4);
@@ -159,7 +162,9 @@ export const TradeSuggestionCard: React.FC<TradeSuggestionCardProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: typeof COLORS) => {
+  const COLORS = colors;
+  return StyleSheet.create({
   container: {
     backgroundColor: COLORS.surface,
     borderRadius: SIZES.radiusMedium,
@@ -223,4 +228,5 @@ const styles = StyleSheet.create({
     paddingVertical: 10, borderRadius: SIZES.radiusSmall,
   },
   executeButtonText: { ...FONTS.semibold, fontSize: 13, color: COLORS.text },
-});
+  });
+};

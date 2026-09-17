@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
 import { DerivProfitTable } from '../types';
 
 interface ProfitSummaryProps {
@@ -10,6 +11,8 @@ interface ProfitSummaryProps {
 }
 
 export const ProfitSummary: React.FC<ProfitSummaryProps> = ({ profitTable, onRefresh }) => {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const formatProfit = (profit: number | string) => {
     const num = typeof profit === 'string' ? parseFloat(profit) : profit;
     const safeNum = isNaN(num) ? 0 : num;
@@ -77,7 +80,9 @@ export const ProfitSummary: React.FC<ProfitSummaryProps> = ({ profitTable, onRef
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: typeof COLORS) => {
+  const COLORS = colors;
+  return StyleSheet.create({
   container: {
     backgroundColor: COLORS.surface,
     borderRadius: SIZES.radiusMedium,
@@ -101,4 +106,5 @@ const styles = StyleSheet.create({
     width: 28, height: 28, borderRadius: 14,
     backgroundColor: COLORS.surfaceLight, justifyContent: 'center', alignItems: 'center',
   },
-});
+  });
+};

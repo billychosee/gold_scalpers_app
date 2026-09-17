@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { MaterialIcons, Ionicons, Feather } from '@expo/vector-icons';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
+import { useTheme } from '../context/ThemeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.75;
@@ -28,6 +29,8 @@ const menuItems: MenuItem[] = [
   { id: 'market', icon: 'candlestick-chart', label: 'Market Watch', iconLib: 'MaterialIcons' },
   { id: 'signals', icon: 'auto-graph', label: 'Trade Signals', iconLib: 'MaterialIcons' },
   { id: 'history', icon: 'history', label: 'Trade History', iconLib: 'MaterialIcons' },
+  { id: 'news', icon: 'notification-important', label: 'Economic News', iconLib: 'MaterialIcons' },
+  { id: 'symbols', icon: 'widgets', label: 'Manage Symbols', iconLib: 'MaterialIcons' },
   { id: 'settings', icon: 'settings', label: 'Settings', iconLib: 'MaterialIcons' },
   { id: 'about', icon: 'info', label: 'About', iconLib: 'MaterialIcons' },
 ];
@@ -38,6 +41,7 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
   activePage,
   onMenuSelect,
 }) => {
+  const { colors } = useTheme();
   const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -79,14 +83,14 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
         <Animated.View style={[styles.overlayBg, { opacity: fadeAnim }]} />
       </TouchableWithoutFeedback>
       
-      <Animated.View style={[styles.drawer, { transform: [{ translateX: slideAnim }] }]}>
+      <Animated.View style={[styles.drawer, { backgroundColor: colors.surface, borderRightColor: colors.border, transform: [{ translateX: slideAnim }] }]}> 
         <SafeAreaView style={styles.drawerContent}>
           {/* Logo */}
           <View style={styles.drawerHeader}>
-            <MaterialIcons name="candlestick-chart" size={32} color={COLORS.gold} />
+            <MaterialIcons name="candlestick-chart" size={32} color={colors.gold} />
             <View>
-              <Text style={styles.drawerTitle}>GOLD</Text>
-              <Text style={styles.drawerTitleAccent}>SCALPER</Text>
+              <Text style={[styles.drawerTitle, { color: colors.text }]}>GOLD</Text>
+              <Text style={[styles.drawerTitleAccent, { color: colors.gold }]}>SCALPER</Text>
             </View>
           </View>
           
@@ -97,7 +101,7 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
                 key={item.id}
                 style={[
                   styles.menuItem,
-                  activePage === item.id && styles.menuItemActive
+                  activePage === item.id && [styles.menuItemActive, { backgroundColor: colors.surfaceLight }]
                 ]}
                 onPress={() => {
                   onMenuSelect(item.id);
@@ -109,31 +113,31 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
                   <MaterialIcons 
                     name={item.icon as any} 
                     size={20} 
-                    color={activePage === item.id ? COLORS.gold : COLORS.textSecondary} 
+                    color={activePage === item.id ? colors.gold : colors.textSecondary} 
                   />
                 ) : item.iconLib === 'Ionicons' ? (
                   <Ionicons 
                     name={item.icon as any} 
                     size={20} 
-                    color={activePage === item.id ? COLORS.gold : COLORS.textSecondary} 
+                    color={activePage === item.id ? colors.gold : colors.textSecondary} 
                   />
                 ) : (
                   <Feather 
                     name={item.icon as any} 
                     size={20} 
-                    color={activePage === item.id ? COLORS.gold : COLORS.textSecondary} 
+                    color={activePage === item.id ? colors.gold : colors.textSecondary} 
                   />
                 )}
                 <Text style={[
                   styles.menuLabel,
-                  activePage === item.id && styles.menuLabelActive
+                  activePage === item.id && [styles.menuLabelActive, { color: colors.gold }]
                 ]}>
                   {item.label}
                 </Text>
                 <MaterialIcons 
                   name="chevron-right" 
                   size={18} 
-                  color={COLORS.textMuted} 
+                  color={colors.textMuted} 
                 />
               </TouchableOpacity>
             ))}
@@ -141,7 +145,7 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
           
           {/* Version */}
           <View style={styles.drawerFooter}>
-            <Text style={styles.versionText}>v1.0.0</Text>
+            <Text style={[styles.versionText, { color: colors.textMuted }]}>v1.0.0</Text>
           </View>
         </SafeAreaView>
       </Animated.View>

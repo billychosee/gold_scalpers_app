@@ -2,17 +2,20 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { COLORS, FONTS, SIZES } from '../../constants/theme';
+import { useTheme } from '../../context/ThemeContext';
 
 interface AboutPageProps {
   onBack: () => void;
 }
 
 export const AboutPage: React.FC<AboutPageProps> = ({ onBack }) => {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-          <MaterialIcons name="arrow-back" size={22} color={COLORS.text} />
+          <MaterialIcons name="arrow-back" size={22} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>About</Text>
       </View>
@@ -54,7 +57,9 @@ export const AboutPage: React.FC<AboutPageProps> = ({ onBack }) => {
   );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (colors: typeof COLORS) => {
+  const COLORS = colors;
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
@@ -82,4 +87,5 @@ const styles = StyleSheet.create({
   disclaimerText: {
     ...FONTS.regular, fontSize: SIZES.small, color: COLORS.textMuted, lineHeight: 18,
   },
-});
+  });
+};
