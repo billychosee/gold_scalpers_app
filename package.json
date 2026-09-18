@@ -6,7 +6,8 @@
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-clipboard/clipboard": "^1.16.3",
-    "expo": "~57.0.21",
+    "expo": "57.0.23",
+    "expo-font": "~57.0.4",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -16,6 +17,7 @@
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
+    "@types/node": "^22.20.2",
     "@types/react": "~19.2.2",
     "@types/ws": "^8.18.1",
     "babel-preset-expo": "^57.0.11",
@@ -30,7 +32,10 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "backtest": "tsx scripts/backtest.ts",
-    "compare-strategies": "tsx scripts/strategy-comparison.ts"
+    "compare-strategies": "tsx scripts/strategy-comparison.ts",
+    "compare-strategy-sensitivity": "tsx scripts/strategy-sensitivity.ts",
+    "backtest:compare": "tsc -p scripts/tsconfig.json && node build/backtest/scripts/runStrategyComparison.js",
+    "adaptive-backtest": "tsx scripts/nestedWalkForward.ts"
   },
   "private": true
 }

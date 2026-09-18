@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import Clipboard from '@react-native-clipboard/clipboard';
-import { COLORS, FONTS, SIZES, SHADOWS } from '../constants/theme';
+import { COLORS, FONTS, getSymbolDisplayName, SIZES, SHADOWS } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { TradeSuggestion } from '../types';
 
@@ -64,7 +64,10 @@ export const TradeSuggestionCard: React.FC<TradeSuggestionCardProps> = ({
             <MaterialIcons name={isBuy ? 'trending-up' : 'trending-down'} size={12} color={COLORS.text} />
             <Text style={styles.directionText}>{suggestion.direction}</Text>
           </View>
-          <Text style={styles.symbol}>{suggestion.symbol}</Text>
+          <View style={styles.symbolBlock}>
+            <Text style={styles.symbol}>{getSymbolDisplayName(suggestion.symbol)}</Text>
+            <Text style={styles.symbolCode}>{suggestion.symbol}</Text>
+          </View>
         </View>
         <View style={styles.headerRight}>
           <Text style={styles.time}>{formatTime(suggestion.timestamp)}</Text>
@@ -77,7 +80,7 @@ export const TradeSuggestionCard: React.FC<TradeSuggestionCardProps> = ({
       {/* Confidence - compact */}
       <View style={styles.confidenceRow}>
         <Ionicons name="shield-checkmark" size={12} color={getConfidenceColor(suggestion.confidence)} />
-        <Text style={styles.confidenceLabel}>Confidence</Text>
+<Text style={styles.confidenceLabel}>Signal strength</Text>
         <Text style={[styles.confidenceValue, { color: getConfidenceColor(suggestion.confidence) }]}>
           {suggestion.confidence}%
         </Text>
@@ -187,7 +190,9 @@ const createStyles = (colors: typeof COLORS) => {
     paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4,
   },
   directionText: { ...FONTS.bold, fontSize: 10, color: COLORS.text },
-  symbol: { ...FONTS.semibold, fontSize: 13, color: COLORS.text },
+  symbolBlock: { maxWidth: 180 },
+  symbol: { ...FONTS.semibold, fontSize: 12, color: COLORS.text },
+  symbolCode: { ...FONTS.regular, fontSize: 9, color: COLORS.textMuted, marginTop: 1 },
   time: { ...FONTS.regular, fontSize: 10, color: COLORS.textMuted },
   copyAllBtn: {
     width: 24, height: 24, borderRadius: 6,

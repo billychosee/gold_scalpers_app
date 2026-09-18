@@ -42,7 +42,8 @@ export const MarketDataCard: React.FC<MarketDataCardProps> = ({
         <View style={styles.left}>
           <View style={styles.symbolRow}>
             <MaterialIcons name={isGold ? 'diamond' : 'currency-exchange'} size={14} color={isGold ? colors.gold : colors.primary} />
-            <Text style={[styles.symbol, { color: colors.text }]}>{symbol}</Text>
+            <Text style={[styles.symbol, { color: colors.text }]}>{label}</Text>
+            <Text style={[styles.label, { color: colors.textMuted }]}>{symbol}</Text>
             <View style={[styles.dirBadge, { backgroundColor: getDirectionColor() + '20' }]}>
               <Text style={[styles.dirText, { color: getDirectionColor() }]}>{direction || '---'}</Text>
             </View>
@@ -52,7 +53,6 @@ export const MarketDataCard: React.FC<MarketDataCardProps> = ({
               </View>
             )}
           </View>
-          <Text style={[styles.label, { color: colors.textMuted }]}>{label}</Text>
         </View>
         <View style={styles.priceCol}>
           {closedUntil ? (

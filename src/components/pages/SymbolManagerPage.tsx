@@ -113,6 +113,9 @@ export const SymbolManagerPage: React.FC<SymbolManagerPageProps> = ({
                     style={[styles.symbolRow, { backgroundColor: colors.surface, borderColor: colors.border }]}
                     onPress={() => onToggleSymbol(sym.symbol)}
                     activeOpacity={0.7}
+                    accessibilityRole="switch"
+                    accessibilityState={{ checked: isActive }}
+                    accessibilityLabel={`${sym.display_name}, ${isActive ? 'active' : 'inactive'}`}
                   >
                     <View style={styles.symbolInfo}>
                       <View style={[
@@ -120,15 +123,15 @@ export const SymbolManagerPage: React.FC<SymbolManagerPageProps> = ({
                         { backgroundColor: isActive ? colors.success : colors.textMuted },
                       ]} />
                       <View>
-                        <Text style={[styles.symbolName, { color: colors.text }]}>{sym.symbol}</Text>
+                        <Text style={[styles.symbolName, { color: colors.text }]}>{sym.display_name}</Text>
                         <Text style={[styles.symbolDisplay, { color: colors.textSecondary }]}>
-                          {sym.display_name}
+                          {sym.symbol} · {sym.market}
                         </Text>
                       </View>
                     </View>
                     <Switch
+                      pointerEvents="none"
                       value={isActive}
-                      onValueChange={() => onToggleSymbol(sym.symbol)}
                       trackColor={{ false: colors.surfaceLight, true: colors.success + '60' }}
                       thumbColor={isActive ? colors.success : colors.textMuted}
                     />

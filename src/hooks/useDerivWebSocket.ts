@@ -27,6 +27,7 @@ import {
   JournalEntry,
 } from '../types';
 import { TRADING_CONFIG, SYMBOLS, SYNTHETIC_SYMBOL_KEYS, PAPER_TRADING } from '../constants/theme';
+import { calculateSyntheticSignalScore } from '../services/SignalScoring';
 
 const SYNTHETIC_SYMBOLS = SYNTHETIC_SYMBOL_KEYS.map((key) => SYMBOLS[key]);
 
@@ -36,6 +37,7 @@ export interface SyntheticMarketData {
   sma: number;
   direction: TradeDirection | null;
   signalStatus: 'WAITING' | 'BUY' | 'SELL';
+  confidence: number;
 }
 
 // Higher timeframe candle type
@@ -258,9 +260,10 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       sma: 0,
       direction: null,
       signalStatus: 'WAITING',
+      confidence: 0,
     })),
   );
-  
+
   // Suggestions state
   const [suggestions, setSuggestions] = useState<TradeSuggestion[]>([]);
   
@@ -884,7 +887,8 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
     const currentSma50 = averageNumbers(quotes.slice(-50));
     const previousSma20 = averageNumbers(quotes.slice(-21, -1));
     const previousSma50 = averageNumbers(quotes.slice(-51, -1));
-    const changes = quotes.slice(-15).map((quote, index, values) => index === 0 ? 0 : quote - values[index - 1]);
+    const recentQuotes = quotes.slice(-15);
+    const changes = recentQuotes.map((quote, index) => index === 0 ? 0 : quote - recentQuotes[index - 1]);
     const gains = changes.reduce((sum, change) => sum + Math.max(change, 0), 0) / 14;
     const losses = changes.reduce((sum, change) => sum + Math.max(-change, 0), 0) / 14;
     const rsi = losses === 0 ? (gains === 0 ? 50 : 100) : 100 - (100 / (1 + gains / losses));
@@ -894,12 +898,20 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
         ? 'SELL'
         : null;
     const signalStatus: SyntheticMarketData['signalStatus'] = currentSma20 > currentSma50 ? 'BUY' : 'SELL';
+    const confidence = calculateSyntheticSignalScore({
+      direction,
+      smaFast: currentSma20,
+      smaSlow: currentSma50,
+      rsi,
+      recentChanges: changes.slice(1),
+      observedTicks: ticks.length,
+    });
     return {
       sma20: currentSma20,
       direction,
       signalStatus,
-      confidence: direction ? 60 : 0,
-      analysis: `SMA20=${currentSma20.toFixed(2)} ${currentSma20 > currentSma50 ? '>' : '<'} SMA50=${currentSma50.toFixed(2)}, RSI=${rsi.toFixed(0)}`,
+      confidence,
+      analysis: `SMA20=${currentSma20.toFixed(2)} ${currentSma20 > currentSma50 ? '>' : '<'} SMA50=${currentSma50.toFixed(2)}, RSI=${rsi.toFixed(0)}, strength=${confidence}/100`,
     };
   }, []);
 
@@ -926,7 +938,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       const analysis = analyzeSyntheticTick(ticks);
 
       setSyntheticMarkets((previous) => previous.map((market) => market.symbol === symbol
-        ? { ...market, price: tick.quote, sma: analysis.sma20, direction: analysis.direction, signalStatus: analysis.signalStatus }
+        ? { ...market, price: tick.quote, sma: analysis.sma20, direction: analysis.direction, signalStatus: analysis.signalStatus, confidence: analysis.confidence }
         : market));
       if (symbol === SYMBOLS.R_100) {
         setR100Price(tick.quote);
@@ -1216,10 +1228,10 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
         // Fetch HTF analysis before requesting ticks so signal generation starts with trend context.
         console.log('[HTF] Fetching initial HTF analysis before tick subscriptions...');
         await refreshHigherTimeframe();
-        Object.values(SYMBOLS).forEach((symbol) => {
-          derivWebSocket.subscribeTicks(symbol);
-        });
-        
+        // Keep subscriptions aligned with the persisted symbol selection.
+        // Discovery is requested after the public socket is definitely open.
+        refreshSymbols();
+
         // Retry HTF analysis after 10 seconds if first attempt failed
         setTimeout(() => {
           console.log('[HTF] Retrying HTF analysis...');
@@ -1231,8 +1243,8 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       setError(errorMessage);
       throw err;
     }
-  }, [refreshHigherTimeframe]);
-  
+  }, [refreshHigherTimeframe, refreshSymbols]);
+
   // Disconnect
   const disconnect = useCallback(() => {
     derivWebSocket.disconnect();
@@ -1267,6 +1279,7 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
       sma: 0,
       direction: null,
       signalStatus: 'WAITING',
+      confidence: 0,
     })));
   }, []);
   
@@ -1756,7 +1769,9 @@ export const useDerivWebSocket = (): UseDerivWebSocketReturn => {
 
     // Load cached discovered symbols
     getCachedDiscovery().then((cached) => {
-      if (cached.length > 0) setDiscoveredSymbols(cached);
+      if (cached.length > 0) {
+        setDiscoveredSymbols(mergeDiscovered([], cached));
+      }
     }).catch(() => {});
 
     return () => {

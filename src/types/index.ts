@@ -82,6 +82,7 @@ export interface TradeSuggestion {
   stopLoss: number;
   tp1: number;
   tp2: number;
+  /** Relative signal-strength score; not a calibrated win probability. */
   confidence: number;
   analysis: string;
   timestamp: Date;

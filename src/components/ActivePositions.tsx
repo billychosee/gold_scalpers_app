@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert } from 'react-native';
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
-import { COLORS, FONTS, SIZES } from '../constants/theme';
+import { COLORS, FONTS, getSymbolDisplayName, SIZES } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { ActivePosition } from '../types';
 
@@ -46,7 +46,10 @@ export const ActivePositions: React.FC<ActivePositionsProps> = ({ positions, onC
               <MaterialIcons name={isBuy ? 'trending-up' : 'trending-down'} size={10} color={COLORS.text} />
               <Text style={styles.dirText}>{item.direction}</Text>
             </View>
-            <Text style={styles.symbolText}>{item.symbol}</Text>
+            <View>
+              <Text style={styles.symbolText}>{getSymbolDisplayName(item.symbol)}</Text>
+              <Text style={styles.symbolCode}>{item.symbol}</Text>
+            </View>
           </View>
           <Text style={[styles.profitText, { color: isProfit ? COLORS.success : COLORS.error }]}>
             {formatProfit(item.profit)}
@@ -130,7 +133,8 @@ const createStyles = (colors: typeof COLORS) => {
     paddingHorizontal: 6, paddingVertical: 2, borderRadius: 3,
   },
   dirText: { ...FONTS.bold, fontSize: 9, color: COLORS.text },
-  symbolText: { ...FONTS.semibold, fontSize: 12, color: COLORS.text },
+  symbolText: { ...FONTS.semibold, fontSize: 11, color: COLORS.text },
+  symbolCode: { ...FONTS.regular, fontSize: 9, color: COLORS.textMuted, marginTop: 1 },
   profitText: { ...FONTS.bold, fontSize: 13 },
   priceRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   priceMini: { ...FONTS.regular, fontSize: 10, color: COLORS.textSecondary },

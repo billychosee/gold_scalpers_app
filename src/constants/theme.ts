@@ -178,11 +178,33 @@ export const SYMBOLS = {
   V_15_1S: '1HZ15V',
   V_30_1S: '1HZ30V',
   V_90_1S: '1HZ90V',
-  CRASH_500: 'BOOM500',
-  CRASH_600: 'BOOM600',
-  BOOM_500: 'CRASH500',
-  BOOM_600: 'CRASH600',
+  BOOM_500: 'BOOM500',
+  BOOM_600: 'BOOM600',
+  CRASH_500: 'CRASH500',
+  CRASH_600: 'CRASH600',
 };
+
+export const SYMBOL_DISPLAY_NAMES: Record<string, string> = {
+  frxXAUUSD: 'Gold (XAU/USD)',
+  frxGBPUSD: 'British Pound / US Dollar',
+  frxAUDUSD: 'Australian Dollar / US Dollar',
+  R_10: 'Volatility 10 Index',
+  R_25: 'Volatility 25 Index',
+  R_50: 'Volatility 50 Index',
+  R_75: 'Volatility 75 Index',
+  R_100: 'Volatility 100 Index',
+  '1HZ15V': 'Volatility 15 (1s) Index',
+  '1HZ30V': 'Volatility 30 (1s) Index',
+  '1HZ90V': 'Volatility 90 (1s) Index',
+  BOOM500: 'Boom 500 Index',
+  BOOM600: 'Boom 600 Index',
+  CRASH500: 'Crash 500 Index',
+  CRASH600: 'Crash 600 Index',
+};
+
+export function getSymbolDisplayName(symbol: string, fallback?: string): string {
+  return SYMBOL_DISPLAY_NAMES[symbol] || fallback || symbol;
+}
 
 export const SYNTHETIC_SYMBOL_KEYS = [
   'R_100', 'R_10', 'R_25', 'R_50', 'R_75',

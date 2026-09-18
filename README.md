@@ -77,8 +77,11 @@ npm run android
 npm run ios
 npm run web
 
-# Run the historical synthetic-index backtest
+# Run the historical single-strategy backtest
 npm run backtest -- --symbol=R_100 --from=2026-01-01 --to=2026-09-01 --strategy=sma_trend
+
+# Run the nested walk-forward adaptive backtest
+npm run adaptive-backtest -- --from=2026-01-01 --to=2026-09-01
 ```
 
 Check TypeScript without emitting files:
@@ -135,12 +138,23 @@ The test subscribes to R_100 ticks for 60 seconds and reports whether ticks are 
 │   ├── constants/           # Theme, symbols, trading, and API configuration
 │   ├── context/             # Theme context and persistence
 │   ├── hooks/               # Deriv connection and application state
-│   ├── services/            # Deriv, news, settings, and journal services
+│   ├── services/            # Deriv, news, settings, journal, and signal-scoring services
 │   └── types/               # API and application TypeScript types
 ├── app.json                 # Expo application configuration
 ├── eas.json                 # EAS Build profiles
 ├── package.json             # Dependencies and development scripts
-├── scripts/backtest.ts      # Historical M1 SMA crossover backtester
+├── scripts/backtest.ts      # Canonical single-strategy historical backtester
+├── scripts/strategy-comparison.ts # Monthly multi-symbol comparison runner
+├── scripts/strategy-sensitivity.ts # Predeclared execution-policy sensitivity runner
+├── scripts/historicalData.ts # Cached, rate-limited candle downloader
+├── scripts/runStrategyComparison.ts # JSON runner for supplied candle files
+├── scripts/nestedWalkForward.ts # Nested walk-forward adaptive backtest runner
+├── src/backtest/            # Shared indicators, execution model, windows, and metrics
+│   ├── indicators.ts        # Precomputed indicator series (SMA, EMA, RSI, BB, MACD, etc.)
+│   ├── strategyComparison.ts # Canonical strategy engine and comparison runner
+│   ├── monthlyWindows.ts    # Monthly window builder for walk-forward splits
+│   ├── nestedWalkForward.ts # Nested walk-forward adaptive selection and confirmation
+│   ├── strategySensitivity.ts # Execution-policy sensitivity report generator
 ├── test-ws.js               # Optional Deriv WebSocket smoke test
 └── .env                     # Local environment values; ignored by Git
 ```
@@ -152,7 +166,7 @@ The test subscribes to R_100 ticks for 60 seconds and reports whether ticks are 
 - Trade History is session-scoped. The Trade Journal is the persistent record of signals, executions, and outcomes.
 - Several Settings controls are currently display-only, including Auto-Execute Trades, minimum confidence, stake amount, SMA period, push notifications, sound, and connection values. Paper trading and theme preferences are functional and persisted.
 - Economic news is loaded from the Trading Economics guest calendar and cached locally for one hour. News blocking applies to relevant FX symbols; R_100 is treated as a synthetic instrument and is not blocked by news events.
-- The backtester assumes an 80% payout and does not claim that a positive sample is durable edge. A bounded R_100 validation from 2026-01-01 through 2026-01-15 produced 312 trades, a 52.24% win rate, EV of -0.0596 per stake, and profit factor 0.8752, so that sample was not profitable.
+- The backtester assumes an 80% payout and does not claim that a positive sample is durable edge. The canonical 2026-01-01 through 2026-09-01 comparison produced 256 monthly TEST rows, all with negative EV, so no strategy was promoted under the 30-trade, every-window, three-of-four-symbol rule.
 
 ## Security and Data Notes
 
@@ -160,6 +174,73 @@ The test subscribes to R_100 ticks for 60 seconds and reports whether ticks are 
 - Use a restricted Deriv token with the minimum required permissions and rotate it if it is ever exposed.
 - Local settings, news cache, and journal entries are stored in AsyncStorage and are not encrypted.
 - Do not store production credentials, private keys, or sensitive account information in the repository.
+
+## Strategy comparison harness
+
+The comparison uses one canonical engine for the single-strategy backtester, JSON runner, and network-backed monthly comparison:
+
+- SMA crossover (20/50 baseline)
+- EMA crossover (8/21)
+- RSI mean-reversion (14, 30/70 thresholds)
+- Bollinger Band breakout (20, 2 standard deviations)
+- Bollinger Band mean-reversion (20, 2 standard deviations)
+- MACD crossover (12/26/9)
+- Donchian channel breakout (20 completed candles)
+- Momentum (3 consecutive candle bodies)
+
+The shared execution model is explicit: signal at the prior completed candle, enter at the current candle open, hold for five candles, assume an 80% net win return and -100% loss, allow overlapping signals, and treat ties as losses. All indicators are precomputed once per symbol. The default split is chronological 60% train, 20% validation, and 20% TEST.
+
+Run the predeclared monthly-window comparison:
+
+```sh
+npm run compare-strategies -- --from=2026-01-01 --to=2026-09-01
+```
+
+The runner caches candles under `.cache/backtest`, throttles requests, retries with exponential backoff, and reports every monthly window separately. A window passes only with positive EV and at least 30 trades. A strategy is promoted only when it passes every window for at least 3 of 4 symbols. Use `--json` for machine-readable output.
+
+Run the predeclared execution-policy sensitivity report:
+
+```sh
+npm run compare-strategy-sensitivity -- --from=2026-01-01 --to=2026-09-01
+```
+
+The sensitivity report runs the same 8 monthly windows × 4 symbols × 8 strategies under three fixed policies: `allow`, `skip_until_exit`, and `cooldown` with a fixed five-bar entry gap. Policies are selected before results are inspected, and each policy receives the same promotion rule. A strategy/symbol is marked execution-policy sensitive only when `allow` is negative in every window while the alternative is positive with at least 30 trades in every window. On the cached 2026-01-01 through 2026-09-01 data, all 768 policy/window/symbol/strategy rows failed; no policy promoted a strategy and no strict execution-policy-sensitive pair was found.
+
+To run one canonical backtest:
+
+```sh
+npm run backtest -- --symbol=R_100 --from=2026-01-01 --to=2026-09-01 --strategy=sma_trend
+```
+
+The JSON runner remains available for supplied candle files:
+
+```sh
+npm run backtest:compare -- path/to/candles.json
+```
+
+### Follow-up research beyond fixed parameters
+
+The negative result is evidence against these fixed signal definitions under this payout and expiry model; it is not evidence that an unconstrained adaptive or machine-learning strategy will work. Any follow-up should remain a separate, predeclared experiment:
+
+- **Regime-adaptive indicators:** choose periods or thresholds from volatility, trend strength, or rolling distribution features, but fit the rule only on the training portion of each walk-forward segment.
+- **Distribution-aware thresholds:** replace fixed RSI/Bollinger cutoffs with training-window quantiles or volatility-normalized distances, with a minimum sample-size rule and no test-window recalibration.
+- **State-conditioned execution:** evaluate whether signal direction or expiry should change by regime, while keeping the execution policy fixed during each comparison.
+- **Machine-learning wrappers:** use a time-ordered feature pipeline, purged/embargoed validation, nested walk-forward model selection, probability calibration, and a locked final TEST set. Compare against the fixed baselines and a no-trade threshold.
+- **Multiple-testing controls:** predeclare the candidate family, cap the search budget, record every attempted configuration, and reserve untouched future data for confirmation. A positive backtest after broad search is not a promotion result by itself.
+
+The sensitivity implementation also keeps indicator computation separate from execution: indicators are calculated once per symbol in O(N) series passes, while policy simulation is rerun against the cached signals. Rolling-channel deques use head indexes rather than repeated array shifts. Signals use only completed observations for current-open entries, and trades crossing a monthly end are excluded from that month's metrics.
+
+## Nested walk-forward (adaptive) backtest
+
+The fixed-parameter comparison in the previous section found no promoted strategy. As a predeclared follow-up within the regime-adaptive category, the adaptive backtest performs a nested walk-forward over a bounded, pre-declared family of parameter candidates:
+
+```sh
+npm run adaptive-backtest -- --from=2026-01-01 --to=2026-09-01
+```
+
+The runner uses one canonical engine, the same 80% net payout / -100% loss execution model, and precomputed per-symbol indicator series. Each parameter candidate is fixed before data inspection. For each strategy and symbol, the engine evaluates every candidate against training windows, selects the winner by validation EV (with minimum-trade gates), and then runs the selected parameters through an untouched confirmation window that never feeds back into selection. A strategy is promoted only when it achieves a positive-EV PASS on every fold's confirmation window for at least `required-symbols` (default 3) of 4 symbols. Use `--json` for machine-readable output and `--required-symbols=N` to override the threshold.
+
+The 24 candidates span SMA (10/30, 20/50, 30/75), EMA (5/13, 8/21, 13/34), RSI mean-reversion (oversold/sold 20/80, 30/70, 35/65), Bollinger Band breakout and mean-reversion (period 20/30 at 2σ/2.5σ), MACD (8/21/5, 12/26/9, 19/39/9), Donchian channel (10/20/30), and momentum (2/3/4 candle bodies).
 
 ## Trading Disclaimer
 

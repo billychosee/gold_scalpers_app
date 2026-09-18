@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import { COLORS, FONTS, SIZES } from '../../constants/theme';
+import { COLORS, FONTS, getSymbolDisplayName, SIZES } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
 import { SyntheticMarketData } from '../../hooks/useDerivWebSocket';
 
@@ -53,8 +53,8 @@ export const MarketWatchPage: React.FC<MarketWatchPageProps> = ({
   const { colors } = useTheme();
   const styles = createStyles(colors);
   const renderSymbolRow = (
-    symbol: string, label: string, price: number, sma: number, 
-    direction: string | null, trend: string | null, closedUntil?: Date | null, onRetry?: () => void
+    symbol: string, label: string, price: number, sma: number,
+    direction: string | null, trend: string | null, closedUntil?: Date | null, onRetry?: () => void, confidence?: number
   ) => {
     const isGold = symbol.includes('XAU');
     const priceStr = isGold ? price.toFixed(2) : price.toFixed(4);
@@ -69,8 +69,8 @@ export const MarketWatchPage: React.FC<MarketWatchPageProps> = ({
               <MaterialIcons name={isGold ? 'diamond' : 'currency-exchange'} size={18} color={isGold ? colors.gold : colors.primary} />
             </View>
             <View>
-              <Text style={styles.symbolName}>{symbol}</Text>
-              <Text style={styles.symbolLabel}>{label}</Text>
+              <Text style={styles.symbolName}>{label}</Text>
+              <Text style={styles.symbolLabel}>{symbol}</Text>
             </View>
           </View>
           <View style={styles.priceCol}>
@@ -97,11 +97,13 @@ export const MarketWatchPage: React.FC<MarketWatchPageProps> = ({
             </Text>
           </View>
           <View style={styles.statMini}>
-            <Text style={styles.statMiniLabel}>H4/D1</Text>
-            <Text style={[styles.statMiniValue, { 
-              color: trend === 'BUY' ? colors.long : trend === 'SELL' ? colors.short : colors.textMuted 
+            <Text style={styles.statMiniLabel}>{confidence !== undefined ? 'Signal strength' : 'H4/D1'}</Text>
+            <Text style={[styles.statMiniValue, {
+              color: confidence !== undefined
+                ? confidence >= 70 ? colors.long : confidence >= 50 ? colors.warning : colors.textMuted
+                : trend === 'BUY' ? colors.long : trend === 'SELL' ? colors.short : colors.textMuted,
             }]}>
-              {trend || '---'}
+              {confidence !== undefined ? `${confidence}/100` : trend || '---'}
             </Text>
           </View>
         </View>
@@ -122,13 +124,14 @@ export const MarketWatchPage: React.FC<MarketWatchPageProps> = ({
       {renderSymbolRow('AUDUSD', 'Australian Dollar / US Dollar', audusdPrice, audusdSma, audusdDirection, audusdTrend, audusdClosedUntil, audusdOnRetry)}
       {syntheticMarkets.map((market) => renderSymbolRow(
         market.symbol,
-        market.symbol === 'R_100' ? 'Volatility 100 Index' : 'Synthetic Index',
+        getSymbolDisplayName(market.symbol),
         market.price,
         market.sma,
         market.direction,
         null,
         null,
         undefined,
+        market.confidence,
       ))}
     </ScrollView>
   );

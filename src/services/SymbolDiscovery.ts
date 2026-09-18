@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getSymbolDisplayName } from '../constants/theme';
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -100,20 +101,20 @@ export function parseActiveSymbolsResponse(response: any): DiscoveredSymbol[] {
       return [];
     }
 
-    // Filter to synthetic indices
-    const synthetics = data.filter((item: any) => {
-      const market = (item.market || '').toLowerCase();
-      return market.includes('synthetic');
-    });
+    // Keep all tradeable markets returned by Deriv. The UI can search and
+    // group them, while the technical symbol code remains the subscription key.
+    const mapped: DiscoveredSymbol[] = data.map((item: any) => {
+      const symbol = String(item.symbol || item.id || '').trim();
+      const fallbackName = item.display_name || item.display || symbol;
+      return {
+        symbol,
+        display_name: getSymbolDisplayName(symbol, fallbackName),
+        market: item.market || 'Other',
+        submarket: item.submarket || '',
+      };
+    }).filter((s: DiscoveredSymbol) => s.symbol);
 
-    const mapped: DiscoveredSymbol[] = synthetics.map((item: any) => ({
-      symbol: item.symbol || item.id || '',
-      display_name: item.display_name || item.display || item.symbol || '',
-      market: item.market || 'Synthetics',
-      submarket: item.submarket || '',
-    })).filter((s: DiscoveredSymbol) => s.symbol);
-
-    console.log(`[Symbols] Discovered ${mapped.length} synthetic indices`);
+    console.log(`[Symbols] Discovered ${mapped.length} tradeable symbols`);
     return mapped;
   } catch (err) {
     console.error('[Symbols] Failed to parse active_symbols:', err);
@@ -128,10 +129,15 @@ export function mergeDiscovered(
 ): DiscoveredSymbol[] {
   const map = new Map<string, DiscoveredSymbol>();
 
-  // Add all cached first
-  for (const s of cached) map.set(s.symbol, s);
-  // Override with newly discovered
-  for (const s of newlyDiscovered) map.set(s.symbol, s);
+  // Add cached symbols first, normalizing human-readable labels in case an
+  // older cache stored only the technical Deriv code.
+  for (const s of cached) {
+    map.set(s.symbol, { ...s, display_name: getSymbolDisplayName(s.symbol, s.display_name) });
+  }
+  // Override with newly discovered data.
+  for (const s of newlyDiscovered) {
+    map.set(s.symbol, { ...s, display_name: getSymbolDisplayName(s.symbol, s.display_name) });
+  }
 
   // Add FX defaults if not in discovered (they may not be "synthetic")
   const fxDefaults: DiscoveredSymbol[] = [

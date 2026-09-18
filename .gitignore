@@ -40,6 +40,9 @@ yarn-error.*
 # Build
 build/
 
+# Backtest cache
+.cache/
+
 # Temporary files
 *.tmp
 *.temp
